@@ -4,9 +4,10 @@
 """
 import os, json, requests
 
-OR_URL = "https://openrouter.ai/api/v1/chat/completions"
+OR_URL = None  # 运行时由 API_BASE 拼出
+API_BASE = os.environ.get("API_BASE", "https://openrouter.ai/api/v1").rstrip("/")
 MODEL = os.environ.get("MODEL", "anthropic/claude-sonnet-4.5")
-API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+API_KEY = os.environ.get("API_KEY") or os.environ.get("OPENROUTER_API_KEY", "")
 PERSONA_FILE = os.path.join(os.path.dirname(__file__), "persona.md")
 
 BASE = (
@@ -40,15 +41,17 @@ def stream_chat(history, posts):
     payload = {
         "model": MODEL, "max_tokens": 2048, "stream": True,
         "messages": messages,
-        "usage": {"include": True},   # OpenRouter：在最后一块返回用量
     }
+    if "openrouter" in API_BASE:
+        payload["usage"] = {"include": True}   # OpenRouter：在最后一块返回用量
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
         "X-Title": "Gude-AiyiPingtai",
     }
     usage = {}
-    with requests.post(OR_URL, headers=headers, json=payload, stream=True, timeout=120) as r:
+    url = API_BASE + "/chat/completions"
+    with requests.post(url, headers=headers, json=payload, stream=True, timeout=120) as r:
         if r.status_code != 200:
             yield f"[顾得没接上线：{r.status_code} {r.text[:200]}]"
             return
