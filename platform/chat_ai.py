@@ -56,8 +56,11 @@ def stream_chat(history, posts):
         if r.status_code != 200:
             yield f"[顾得没接上线：{r.status_code} {r.text[:200]}]"
             return
-        for line in r.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data:"):
+        for raw in r.iter_lines(decode_unicode=False):
+            if not raw:
+                continue
+            line = raw.decode("utf-8", "ignore")
+            if not line.startswith("data:"):
                 continue
             data = line[5:].strip()
             if data == "[DONE]":
