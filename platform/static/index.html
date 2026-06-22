@@ -166,19 +166,21 @@ async function loadPeriods(){try{const r=await api("/api/periods");const arr=awa
 }catch(e){}}
 async function addPeriod(){const d=$("#periodDate").value||todayStr();await api("/api/periods",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({start_date:d})});loadPeriods();}
 async function delPeriod(id){await api("/api/periods/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});loadPeriods();}
-// 班次定义：名字 + 简称 + 颜色（点了直接排）
+// 班次定义：名字 + 简称 + 颜色（取自佳佳的色卡：草莓芝士 + 枇杷莓子酒，去枇杷黄）
 const SHIFTS=[
-  {v:"早班",s:"早班",c:"#E0A53B"},
-  {v:"副班",s:"副班",c:"#5B8FB0"},
-  {v:"睡班",s:"睡班",c:"#6FA56F"},
-  {v:"夜班",s:"夜班",c:"#6A5B8F"},
-  {v:"早班+睡班",s:"早+睡",c:"#C08A4A"},
-  {v:"早班+夜班",s:"早+夜",c:"#9B5B7A"},
-  {v:"休息",s:"休息",c:"#B8AE9C"},
-  {v:"休假",s:"休假",c:"#A6B89C"},
-  {v:"疗养",s:"疗养",c:"#9CAEB8"},
+  {v:"早班",s:"早班",c:"#EBD27E"},      // 淡蜜黄
+  {v:"副班",s:"副班",c:"#93AEC4"},      // 雾霾蓝
+  {v:"睡班",s:"睡班",c:"#74C5BD"},      // 空色
+  {v:"夜班",s:"夜班",c:"#8E7BAF"},      // 豆花紫
+  {v:"早班+睡班",s:"早+睡",c:"#F4B3AB"}, // 蜜桃粉
+  {v:"早班+夜班",s:"早+夜",c:"#E191A6"}, // 芍药
+  {v:"休息",s:"休息",c:"#D2697A"},      // 丹红
+  {v:"休假",s:"休假",c:"#A9D8D2"},      // 浅空色
+  {v:"疗养",s:"疗养",c:"#C3B5D8"},      // 浅豆花紫
 ];
 function shiftColor(v){const f=SHIFTS.find(x=>x.v===v);return f?f.c:"#9C8F7E";}
+// 标签文字自动深/浅，保证在任何底色上都清楚
+function textColor(hex){const c=hex.replace('#','');const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);return (0.299*r+0.587*g+0.114*b)/255>0.62?'#3A332B':'#fff';}
 function shiftShort(v){const f=SHIFTS.find(x=>x.v===v);return f?f.s:v;}
 let calY,calM,shiftMap={},selDate=null;
 async function loadShifts(){try{const r=await api("/api/shifts");const arr=await r.json();shiftMap={};arr.forEach(s=>shiftMap[s.date]=s.shift);}catch(e){shiftMap={};}
@@ -194,7 +196,7 @@ function renderCal(){
   for(let i=0;i<lead;i++)html+='<div class="d empty"></div>';
   for(let day=1;day<=days;day++){const ds=calY+"-"+pad2(calM+1)+"-"+pad2(day);const sh=shiftMap[ds];
     const cls="d"+(ds===t?" today":"")+(ds===selDate?" sel":"");
-    const lbl=sh?`<span class="lbl" style="background:${shiftColor(sh)}">${shiftShort(sh)}</span>`:"";
+    const lbl=sh?`<span class="lbl" style="background:${shiftColor(sh)};color:${textColor(shiftColor(sh))}">${shiftShort(sh)}</span>`:"";
     html+=`<div class="${cls}" onclick="pickDay('${ds}')">${day}${lbl}</div>`;}
   $("#cal").innerHTML=html;
 }
@@ -202,7 +204,7 @@ function renderLegend(){$("#legend").innerHTML=SHIFTS.map(s=>`<span><i style="ba
 function pickDay(ds){selDate=ds;renderCal();
   const bar=$("#shiftbar");
   bar.innerHTML=`<span style="width:100%;font-size:12px;color:var(--soft)">给 ${ds} 选班次：</span>`+
-    SHIFTS.map(s=>`<button style="border-color:${s.c}" onclick="setShift('${s.v}')">${s.s}</button>`).join("")+
+    SHIFTS.map(s=>`<button style="background:${s.c};color:${textColor(s.c)};border-color:${s.c}" onclick="setShift('${s.v}')">${s.s}</button>`).join("")+
     `<button class="clr" onclick="setShift('')">清除</button>`;
   bar.style.display="flex";
 }
