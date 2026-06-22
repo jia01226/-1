@@ -123,7 +123,7 @@ def add_message(author, content, session_id=1, msg_type="text"):
 def recent_messages(session_id=1, limit=40):
     conn = get_db()
     rows = conn.execute(
-        "SELECT author,content FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
+        "SELECT author,content,created_at FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
         (session_id, limit)).fetchall()
     conn.close()
     return [dict(r) for r in reversed(rows)]
