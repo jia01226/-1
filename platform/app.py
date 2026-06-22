@@ -67,10 +67,10 @@ def api_chat():
                 db.log_usage(chat_ai.MODEL, it, ot, cost)
                 continue
             acc += piece
-            yield "data: " + json.dumps({"t": piece}, ensure_ascii=False) + "\n\n"
+            yield ("data: " + json.dumps({"t": piece}, ensure_ascii=False) + "\n\n").encode("utf-8")
         if acc:
             db.add_message("assistant", acc)
-        yield "data: " + json.dumps({"done": True}, ensure_ascii=False) + "\n\n"
+        yield ("data: " + json.dumps({"done": True}, ensure_ascii=False) + "\n\n").encode("utf-8")
 
     return Response(gen(), content_type="text/event-stream; charset=utf-8",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
