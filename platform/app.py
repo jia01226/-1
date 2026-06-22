@@ -72,7 +72,7 @@ def api_chat():
             db.add_message("assistant", acc)
         yield "data: " + json.dumps({"done": True}, ensure_ascii=False) + "\n\n"
 
-    return Response(gen(), mimetype="text/event-stream",
+    return Response(gen(), content_type="text/event-stream; charset=utf-8",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 # ---- 历史 / 记忆 / 用量 ----

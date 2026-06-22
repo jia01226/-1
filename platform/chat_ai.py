@@ -2,7 +2,7 @@
 核心阶段：系统提示 = persona.md（由 CLAUDE.md 复制而来）+ 数据库里的 posts。
 第二阶段再接入向量语义检索（vector_search.py）。
 """
-import os, json, requests
+import os, json, codecs, requests
 
 OR_URL = None  # 运行时由 API_BASE 拼出
 API_BASE = os.environ.get("API_BASE", "https://openrouter.ai/api/v1").rstrip("/")
@@ -56,25 +56,31 @@ def stream_chat(history, posts):
         if r.status_code != 200:
             yield f"[顾得没接上线：{r.status_code} {r.text[:200]}]"
             return
-        for raw in r.iter_lines(decode_unicode=False):
-            if not raw:
+        # 增量 UTF-8 解码：正确处理跨网络分片被切断的多字节中文/emoji
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        buffer = ""
+        for chunk in r.iter_content(chunk_size=1024):
+            if not chunk:
                 continue
-            line = raw.decode("utf-8", "ignore")
-            if not line.startswith("data:"):
-                continue
-            data = line[5:].strip()
-            if data == "[DONE]":
-                break
-            try:
-                ev = json.loads(data)
-            except Exception:
-                continue
-            if ev.get("usage"):
-                usage = ev["usage"]
-            ch = ev.get("choices", [{}])[0]
-            piece = (ch.get("delta") or {}).get("content") or ""
-            if piece:
-                yield piece
+            buffer += decoder.decode(chunk)
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    continue
+                try:
+                    ev = json.loads(data)
+                except Exception:
+                    continue
+                if ev.get("usage"):
+                    usage = ev["usage"]
+                ch = ev.get("choices", [{}])[0]
+                piece = (ch.get("delta") or {}).get("content") or ""
+                if piece:
+                    yield piece
     yield ("__usage__", usage)
 
 def estimate_cost(model, usage):
