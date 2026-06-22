@@ -41,14 +41,16 @@ After=network.target
 [Service]
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
-ExecStart=$APP_DIR/venv/bin/gunicorn -w 2 -k gthread --threads 8 -t 180 -b 127.0.0.1:8000 app:app
+ExecStart=$APP_DIR/venv/bin/gunicorn -w 2 -k gthread --threads 8 -t 180 -b 0.0.0.0:8000 app:app
 Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now gude
+sudo ufw allow 8000/tcp 2>/dev/null || true   # 放行 8000 端口（如启用了防火墙）
 echo "✅ 顾得服务已启动（systemctl status gude 可查看）"
+echo "🌐 先用 IP 访问： http://$(curl -s ifconfig.me 2>/dev/null):8000"
 
 cat <<'NEXT'
 
