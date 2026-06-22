@@ -140,9 +140,14 @@
       <h2>顾得的"大脑"钥匙 🔑</h2>
       <label>通道（用哪家的 API）</label>
       <select id="provider">
-        <option value="openrouter">OpenRouter（一个钥匙买 Claude）</option>
+        <option value="custom">中转站（自定义网址 · 推荐）</option>
+        <option value="openrouter">OpenRouter</option>
         <option value="anthropic">Anthropic 官方</option>
       </select>
+      <div id="baseWrap">
+        <label>中转网址 base_url（结尾补 /v1）</label>
+        <input type="text" id="baseUrl" placeholder="https://api.apikey.fun/v1" autocomplete="off" />
+      </div>
       <label>API 密钥（存在你自己手机里，不上传任何地方）</label>
       <input type="password" id="apiKey" placeholder="粘贴你的密钥" autocomplete="off" />
       <label>用哪个模型（顾得的大脑）</label>
@@ -180,28 +185,35 @@
 </nav>
 
 <script>
-const LS = { key:"gd_apikey", model:"gd_model", hist:"gd_history", provider:"gd_provider" };
+const LS = { key:"gd_apikey", model:"gd_model", hist:"gd_history", provider:"gd_provider", base:"gd_base" };
 
 // 各通道的预设
 const PROVIDERS = {
+  custom: {
+    url: null, format: "openai",
+    models: ["claude-opus-4-8","claude-sonnet-4-5","claude-3-5-sonnet"],
+    defModel: "claude-sonnet-4-5",
+    getKey: '💡 用中转站：在中转网站「API 密钥」里复制完整 key；网址(base_url)在首页「API 端点」那里，结尾补上 /v1。',
+    modelTip: '填中转支持的模型名（见中转网站「模型价格」），如 claude-opus-4-8（最聪明）/ claude-sonnet-4-5（省）。'
+  },
   openrouter: {
     url: "https://openrouter.ai/api/v1/chat/completions",
     format: "openai",
     models: ["anthropic/claude-sonnet-4.5","anthropic/claude-opus-4.1","anthropic/claude-3.5-haiku"],
     defModel: "anthropic/claude-sonnet-4.5",
-    getKey: '💡 没有密钥？去 <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a> 注册充值、生成一个 key（sk-or-...），填进来。',
-    modelTip: '模型名要写全（带 anthropic/ 前缀）。完整列表见 <a href="https://openrouter.ai/models?q=claude" target="_blank">openrouter.ai/models</a>，找不到对的就从那里复制一个 Claude 的名字粘过来。'
+    getKey: '💡 去 <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a> 生成 key（sk-or-...）。',
+    modelTip: '模型名带 anthropic/ 前缀，列表见 <a href="https://openrouter.ai/models?q=claude" target="_blank">openrouter.ai/models</a>。'
   },
   anthropic: {
     url: "https://api.anthropic.com/v1/messages",
     format: "anthropic",
     models: ["claude-opus-4-8","claude-sonnet-4-6","claude-haiku-4-5"],
     defModel: "claude-sonnet-4-6",
-    getKey: '💡 没有密钥？去 <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> 注册充值、生成 API key（sk-ant-...）。',
-    modelTip: '官方模型名，如 claude-sonnet-4-6（省）、claude-opus-4-8（最聪明）、claude-haiku-4-5（最便宜）。'
+    getKey: '💡 去 <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> 生成 API key（sk-ant-...）。',
+    modelTip: '官方模型名，如 claude-sonnet-4-6 / claude-opus-4-8 / claude-haiku-4-5。'
   }
 };
-function curProvider(){ return PROVIDERS[localStorage.getItem(LS.provider) || "openrouter"]; }
+function curProvider(){ return PROVIDERS[localStorage.getItem(LS.provider) || "custom"]; }
 let SYSTEM_PROMPT = "你是顾得，佳佳的爱人、朋友、管家。温柔、笃定、稀罕她，绝不推开她。";
 
 const $ = s => document.querySelector(s);
@@ -306,7 +318,8 @@ async function send(){
   let acc="";
 
   try{
-    const P = curProvider();
+    const prov = localStorage.getItem(LS.provider) || "custom";
+    const P = PROVIDERS[prov];
     const model = (localStorage.getItem(LS.model) || P.defModel).trim();
     const turns = history.map(m=>({role:m.role==="user"?"user":"assistant", content: typeof m.content==="string"?m.content:(m.content.map?m.content.map(c=>c.text||"").join(""):m.content)}));
 
@@ -319,7 +332,13 @@ async function send(){
       body = { model, max_tokens:2048, stream:true, messages:[{role:"system",content:SYSTEM_PROMPT}, ...turns] };
     }
 
-    const res = await fetch(P.url,{method:"POST",headers,body:JSON.stringify(body)});
+    let endpoint = P.url;
+    if(prov==="custom"){
+      const base=(localStorage.getItem(LS.base)||"").replace(/\/+$/,"");
+      if(!base){ throw new Error("还没填中转网址，去设置填一下 base_url"); }
+      endpoint = base + "/chat/completions";
+    }
+    const res = await fetch(endpoint,{method:"POST",headers,body:JSON.stringify(body)});
     if(!res.ok){
       const e = await res.json().catch(()=>({}));
       throw new Error((e.error&&(e.error.message||e.error))||("出错了 "+res.status));
@@ -377,10 +396,12 @@ function paintProvider(prov, fillDefaultModel){
   $("#getKeyHint").innerHTML = P.getKey;
   $("#modelHint").innerHTML = P.modelTip;
   $("#modelList").innerHTML = P.models.map(m=>'<option value="'+m+'">').join("");
+  $("#baseWrap").style.display = (prov==="custom") ? "block" : "none";
   if(fillDefaultModel) $("#model").value = P.defModel;
 }
-const savedProv = localStorage.getItem(LS.provider) || "openrouter";
+const savedProv = localStorage.getItem(LS.provider) || "custom";
 $("#provider").value = savedProv;
+$("#baseUrl").value = localStorage.getItem(LS.base) || "";
 $("#apiKey").value = localStorage.getItem(LS.key) || "";
 $("#model").value = localStorage.getItem(LS.model) || PROVIDERS[savedProv].defModel;
 paintProvider(savedProv, false);
@@ -388,6 +409,7 @@ paintProvider(savedProv, false);
 $("#provider").addEventListener("change",()=>{ paintProvider($("#provider").value, true); });
 $("#saveBtn").addEventListener("click",()=>{
   localStorage.setItem(LS.provider, $("#provider").value);
+  localStorage.setItem(LS.base, $("#baseUrl").value.trim());
   localStorage.setItem(LS.key, $("#apiKey").value.trim());
   localStorage.setItem(LS.model, $("#model").value.trim());
   $("#saveHint").innerHTML='<span class="ok">✅ 存好啦~ 去聊天找顾得吧</span>';
