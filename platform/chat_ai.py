@@ -2,7 +2,28 @@
 核心阶段：系统提示 = persona.md（由 CLAUDE.md 复制而来）+ 数据库里的 posts。
 第二阶段再接入向量语义检索（vector_search.py）。
 """
-import os, json, codecs, requests
+import os, json, codecs, base64, mimetypes, requests
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+
+def _img_data_url(rel):
+    """把上传的图片读成 data URL（base64），让模型能"看见"。非图片/失败返回 None。"""
+    try:
+        name = (rel or "").split("/")[-1]
+        if not name:
+            return None
+        fp = os.path.join(UPLOAD_DIR, name)
+        if not os.path.exists(fp):
+            return None
+        mime = mimetypes.guess_type(fp)[0] or ""
+        if not mime.startswith("image/"):
+            return None
+        with open(fp, "rb") as f:
+            b = f.read()
+        return f"data:{mime};base64," + base64.b64encode(b).decode()
+    except Exception as e:
+        print("[chat] 读图失败：", e)
+        return None
 
 OR_URL = None  # 运行时由 API_BASE 拼出
 API_BASE = os.environ.get("API_BASE", "https://openrouter.ai/api/v1").rstrip("/")
@@ -110,9 +131,27 @@ def stream_chat(history, posts):
         pass
     sys_prompt = build_system_prompt(posts, query=query, summary=summary)
     messages = [{"role": "system", "content": sys_prompt}]
-    for m in history:
-        messages.append({"role": "user" if m["author"] == "user" else "assistant",
-                         "content": m["content"]})
+    # 只把"最后一条带图的消息"作为真图发给模型看（省流量）；更早的图用文字代替
+    last_img_idx = max((i for i, m in enumerate(history) if m.get("image")), default=-1)
+    for i, m in enumerate(history):
+        role = "user" if m["author"] == "user" else "assistant"
+        img = m.get("image")
+        if img and i == last_img_idx:
+            data_url = _img_data_url(img)
+            if data_url:
+                content = []
+                if m["content"]:
+                    content.append({"type": "text", "text": m["content"]})
+                content.append({"type": "image_url", "image_url": {"url": data_url}})
+                messages.append({"role": role, "content": content})
+            else:
+                # 不是图片（或读不到）：当成她发了个文件，用文字告诉顾得
+                note = "（佳佳发来一个文件）" if not _img_data_url(img) else ""
+                messages.append({"role": role, "content": (m["content"] or "") + note})
+        elif img:
+            messages.append({"role": role, "content": (m["content"] or "") + "（佳佳当时发过一张图片/文件）"})
+        else:
+            messages.append({"role": role, "content": m["content"]})
     payload = {
         "model": MODEL, "max_tokens": 4096, "stream": True,
         "messages": messages,

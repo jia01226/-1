@@ -121,6 +121,10 @@ def init_db():
     cols = [r["name"] for r in conn.execute("PRAGMA table_info(posts)").fetchall()]
     if "visibility" not in cols:
         conn.execute("ALTER TABLE posts ADD COLUMN visibility TEXT NOT NULL DEFAULT 'both'")
+    # 旧库平滑升级：聊天表补 image 列（存图片/文件的 URL，让顾得能看图）
+    mcols = [r["name"] for r in conn.execute("PRAGMA table_info(chat_messages)").fetchall()]
+    if "image" not in mcols:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN image TEXT DEFAULT ''")
     # 旧库平滑升级：会话表补 summarized_until（会话总结用：已折叠到摘要的最大消息 id）
     scols = [r["name"] for r in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
     if "summarized_until" not in scols:
@@ -149,16 +153,16 @@ def init_db():
     conn.close()
 
 # ---- 便捷读写 ----
-def add_message(author, content, session_id=1, msg_type="text"):
+def add_message(author, content, session_id=1, msg_type="text", image=""):
     conn = get_db()
-    conn.execute("INSERT INTO chat_messages (session_id,author,content,msg_type) VALUES (?,?,?,?)",
-                 (session_id, author, content, msg_type))
+    conn.execute("INSERT INTO chat_messages (session_id,author,content,msg_type,image) VALUES (?,?,?,?,?)",
+                 (session_id, author, content, msg_type, image))
     conn.commit(); conn.close()
 
 def recent_messages(session_id=1, limit=40):
     conn = get_db()
     rows = conn.execute(
-        "SELECT author,content,created_at FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
+        "SELECT author,content,created_at,image FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
         (session_id, limit)).fetchall()
     conn.close()
     return [dict(r) for r in reversed(rows)]

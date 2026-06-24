@@ -9,19 +9,23 @@
   GET  /api/usage       用量/花费汇总
 密钥只在服务器端，浏览器永远看不到。
 """
-import os, json, functools
+import os, json, functools, uuid
 from datetime import timedelta
 from flask import Flask, request, Response, send_from_directory, jsonify, session
 import db, chat_ai
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 PASSCODE = os.environ.get("ACCESS_PASSCODE", "").strip()
+IMG_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp"}
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24).hex())
 # 登录记住一年：佳佳输一次口令，以后就不用再输了（门照样锁着，陌生人进不来）
 app.permanent_session_lifetime = timedelta(days=365)
 app.config.update(SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True)
+app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024   # 单次上传上限 30MB
 db.init_db()
 
 # ---- 可选访问口令 ----
@@ -61,10 +65,12 @@ def sw_js():
 @app.post("/api/chat")
 @guard
 def api_chat():
-    text = (request.json or {}).get("text", "").strip()
-    if not text:
+    data = request.json or {}
+    text = (data.get("text") or "").strip()
+    image = (data.get("image") or "").strip()
+    if not text and not image:
         return jsonify({"error": "empty"}), 400
-    db.add_message("user", text)
+    db.add_message("user", text, image=image, msg_type=("image" if image else "text"))
     history = db.recent_messages()
     posts = db.app_posts()   # app 里的顾得看 both+app（含只在 app 的悄悄话）
 
@@ -89,6 +95,23 @@ def api_chat():
 @app.get("/api/messages")
 @guard
 def api_messages(): return jsonify(db.recent_messages(limit=200))
+
+# ---- 上传照片/文件（拍照、相册、文件都走这里）----
+@app.post("/api/upload")
+@guard
+def api_upload():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "no file"}), 400
+    ext = os.path.splitext(f.filename)[1].lower()[:10]
+    name = uuid.uuid4().hex + ext
+    f.save(os.path.join(UPLOAD_DIR, name))
+    return jsonify({"url": "/uploads/" + name, "is_image": ext in IMG_EXT, "name": f.filename})
+
+@app.get("/uploads/<path:p>")
+@guard
+def serve_upload(p):
+    return send_from_directory(UPLOAD_DIR, p)
 
 @app.get("/api/posts")
 @guard
