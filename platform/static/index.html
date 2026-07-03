@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#FBF8F1" />
+<link rel="manifest" href="/static/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/static/icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="AI 助手" />
+<title>AI 助手</title>
+<style>
+  :root{--bg:#FBF8F1;--card:#fff;--ink:#4A4138;--soft:#9C8F7E;--gold:#C9A86A;--gold-deep:#B8924E;--line:#EFE7D8;--me:#F3E7CF;--shadow:0 6px 24px rgba(180,146,78,.10)}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;height:100dvh}
+  header{padding:13px;text-align:center;background:linear-gradient(180deg,#FFFDF8,#FBF8F1);border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:18px;letter-spacing:2px;color:var(--gold-deep)}
+  header .sub{font-size:11px;color:var(--soft);margin-top:2px}
+  main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .view{display:none;padding:14px;max-width:680px;margin:0 auto}.view.active{display:block}
+  .msg{display:flex;margin:10px 0}.msg.me{justify-content:flex-end}
+  .bubble{max-width:80%;padding:11px 14px;border-radius:18px;font-size:15px;line-height:1.6;box-shadow:var(--shadow);white-space:pre-wrap;word-break:break-word}
+  .me .bubble{background:var(--me);border-bottom-right-radius:6px}
+  .gude .bubble{background:#fff;border:1px solid var(--line);border-bottom-left-radius:6px}
+  .tag{font-size:10px;color:var(--soft);margin:0 6px 2px}
+  .empty{text-align:center;color:var(--soft);font-size:14px;margin-top:50px;line-height:2}
+  footer{padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:#FFFDF8;border-top:1px solid var(--line)}
+  .composer{display:flex;gap:8px;align-items:flex-end;max-width:680px;margin:0 auto}
+  textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:20px;padding:10px 14px;font-size:15px;font-family:inherit;max-height:120px;outline:none}
+  textarea:focus{border-color:var(--gold)}
+  .send{width:44px;height:44px;border-radius:50%;border:none;background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#fff;font-size:18px;box-shadow:var(--shadow)}
+  nav{display:flex;background:#FFFDF8;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;border:none;background:none;padding:9px 0 8px;color:var(--soft);font-size:11px;font-family:inherit}
+  nav button .ic{display:block;font-size:19px}nav button.on{color:var(--gold-deep)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
+  .card h2{margin:0 0 6px;font-size:14px;color:var(--gold-deep)}
+  .card .meta{font-size:11px;color:var(--soft);margin-bottom:6px}
+  .card .ct{font-size:14px;line-height:1.7;white-space:pre-wrap}
+  input,select{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:12px;font-size:15px;font-family:inherit;outline:none;margin-top:8px}
+  .btn{width:100%;margin-top:12px;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#fff;font-size:15px;box-shadow:var(--shadow)}
+  .big{font-size:30px;font-weight:600;color:var(--gold-deep)}
+  .typing::after{content:'▍';animation:bl 1s steps(2) infinite;color:var(--gold)}@keyframes bl{50%{opacity:0}}
+  #gate{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;padding:30px;z-index:9}
+  .calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .calhead b{font-size:15px;color:var(--gold-deep)}
+  .calhead button{border:1px solid var(--line);background:#fff;border-radius:10px;width:34px;height:30px;font-size:15px;color:var(--gold-deep)}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .cal .h{text-align:center;font-size:11px;color:var(--soft);padding:2px 0}
+  .cal .d{min-height:44px;border:1px solid var(--line);border-radius:8px;padding:2px 0 0;font-size:11px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;color:var(--ink)}
+  .cal .d.empty{border:none}
+  .cal .d.today{border-color:var(--gold)}
+  .cal .d.sel{box-shadow:0 0 0 2px var(--gold);border-color:var(--gold)}
+  .cal .d .lbl{margin-top:2px;font-size:9px;line-height:1.4;border-radius:4px;padding:1px 3px;color:#fff;width:90%;text-align:center;word-break:keep-all}
+  .shiftbar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .shiftbar button{flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:14px;padding:6px 10px;font-size:13px;font-family:inherit;color:var(--ink)}
+  .shiftbar button.clr{color:var(--soft)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;font-size:11px;color:var(--soft)}
+  .legend span{display:inline-flex;align-items:center;gap:3px}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="big">AI&nbsp;助手</div>
+  <div style="color:var(--soft);margin:10px 0">请输入访问口令</div>
+  <input id="pc" type="password" placeholder="口令" style="max-width:260px" />
+  <button class="btn" style="max-width:260px" onclick="login()">进入</button>
+</div>
+
+<header><h1>AI&nbsp;助手</h1><div class="sub"></div></header>
+<main>
+  <section id="chatView" class="view active"><div id="messages"></div></section>
+  <section id="memView" class="view">
+    <div class="card"><h2>添加一条记忆</h2>
+      <select id="ptype"><option value="MEMORY">记忆</option><option value="EVENT">事件</option><option value="MOMENT">瞬间</option><option value="PROMISE">承诺</option><option value="WISHLIST">愿望</option></select>
+      <select id="pvis"><option value="both">💛 两边都看（也存进仓库）</option><option value="app">🔒 只在这里悄悄说（不进仓库）</option></select>
+      <input id="pcontent" placeholder="想让它记住的事…" />
+      <button class="btn" onclick="addPost()">记下来</button>
+      <div class="ct" style="margin-top:8px;color:var(--soft);font-size:12px">🔒「只在这里」的记忆只待在你自己的服务器，不会上传到 GitHub 仓库。</div>
+    </div>
+    <div id="postList"></div>
+  </section>
+  <section id="dashView" class="view">
+    <div class="card">
+      <h2>消息推送 🔔</h2>
+      <div class="ct" style="margin-bottom:8px">开启后,会主动给这台设备发通知(锁屏也收得到),点开直接进入~</div>
+      <button class="btn" onclick="enablePush()">开启推送</button>
+      <button class="btn" style="background:none;border:1px solid var(--line);color:var(--soft);box-shadow:none" onclick="testPush()">发一条测试推送</button>
+      <div id="pushHint" class="ct" style="margin-top:8px"></div>
+      <div class="ct" style="margin-top:8px;color:var(--soft);font-size:12px">📱 iPhone 要先把本页面「添加到主屏幕」、从主屏那个图标打开后,再来这里开启推送哦~</div>
+    </div>
+    <div class="card"><h2>用量 / 花费</h2><div id="usage" class="ct">加载中…</div></div>
+  </section>
+  <section id="lifeView" class="view">
+    <div class="card"><h2>💗 待办与提醒</h2>
+      <div class="ct" style="color:var(--soft);font-size:12px;margin-bottom:6px">还没了结的事记在这，到回访日会主动提醒你~ 弄好了点一下就收进"已了结"。</div>
+      <div id="concernList" class="ct" style="margin-bottom:6px">加载中…</div>
+      <input id="cnTitle" placeholder="一件让你挂心的事…" />
+      <select id="cnImp"><option value="5">重要度 5 · 最上心</option><option value="4">重要度 4</option><option value="3" selected>重要度 3</option><option value="2">重要度 2</option><option value="1">重要度 1</option></select>
+      <input id="cnDate" type="date" />
+      <div class="ct" style="color:var(--soft);font-size:12px;margin-top:4px">↑ 可选：填个"回访日"，到那天会主动提醒你</div>
+      <button class="btn" onclick="addConcern()">记下这桩心事</button>
+    </div>
+    <div class="card"><h2>💞 我们的纪念日</h2>
+      <div id="annivList" class="ct">加载中…</div>
+      <input id="annName" placeholder="纪念日名字（如：第一次约会）" />
+      <input id="annDate" type="date" />
+      <button class="btn" onclick="addAnniv()">记下这个日子</button>
+    </div>
+    <div class="card"><h2>🩸 姨妈记录</h2>
+      <div class="ct" style="color:var(--soft);font-size:12px;margin-bottom:6px">记一下来的日子，会预测下次、提前提醒你注意保暖、备好用品~</div>
+      <div id="periodInfo" class="ct" style="margin-bottom:6px"></div>
+      <input id="periodDate" type="date" />
+      <button class="btn" onclick="addPeriod()">姨妈来了 · 记一下</button>
+      <div id="periodList" class="ct" style="margin-top:8px"></div>
+    </div>
+    <div class="card"><h2>📱 应用使用记录</h2>
+      <div class="ct" style="color:var(--soft);font-size:12px;margin-bottom:6px">手机上设好「快捷指令」后，你打开某个 app，这边就会记一笔，方便它了解你的情况。</div>
+      <div id="actList" class="ct"><span style="color:var(--soft)">还没有记录~ 设好快捷指令就会出现</span></div>
+    </div>
+    <div class="card"><h2>📅 我的轮班表</h2>
+      <div class="ct" style="color:var(--soft);font-size:12px;margin-bottom:8px">先点一个日子，再点下面的班次，就排好啦~ 它就知道你那天几点上下班。</div>
+      <div class="calhead"><button onclick="calMove(-1)">‹</button><b id="calTitle"></b><button onclick="calMove(1)">›</button></div>
+      <div id="cal" class="cal"></div>
+      <div id="shiftbar" class="shiftbar" style="display:none"></div>
+      <div id="legend" class="legend"></div>
+    </div>
+  </section>
+</main>
+<footer id="footer">
+  <div id="pendingBar" style="display:none;align-items:center;gap:8px;max-width:680px;margin:0 auto 6px;padding:6px 8px;background:#fff;border:1px solid var(--line);border-radius:12px">
+    <img id="pendingThumb" style="width:40px;height:40px;object-fit:cover;border-radius:8px;display:none" />
+    <span id="pendingName" style="flex:1;font-size:13px;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <span onclick="clearPending()" style="color:var(--soft);padding:2px 8px">✕</span>
+  </div>
+  <div class="composer">
+    <button class="send" style="background:#fff;border:1px solid var(--line);color:var(--gold-deep);font-size:24px;line-height:1" onclick="document.getElementById('file').click()" title="拍照/相册/文件">＋</button>
+    <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
+    <button class="send" onclick="send()">➤</button>
+  </div>
+  <input id="file" type="file" style="display:none" onchange="onPickFile(this)" />
+</footer>
+<nav>
+  <button data-v="chatView" class="on"><span class="ic">💬</span>聊天</button>
+  <button data-v="memView"><span class="ic">📒</span>记忆库</button>
+  <button data-v="lifeView"><span class="ic">💕</span>日常</button>
+  <button data-v="dashView"><span class="ic">📊</span>仪表盘</button>
+</nav>
+
+<script>
+const $=s=>document.querySelector(s);const msgs=$("#messages");
+async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
+async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";boot();}else alert("口令不对呀~");}
+
+function nowHM(){const d=new Date();return pad2(d.getHours())+":"+pad2(d.getMinutes());}
+function fmtTime(s){if(!s)return"";const m=String(s).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);if(!m)return"";const d=m[1]+"-"+m[2]+"-"+m[3];return (d===todayStr()?"":m[2]+"/"+m[3]+" ")+m[4]+":"+m[5];}
+function isImg(u){return /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(u||"");}
+function bubble(role,text,time,image){const w=document.createElement("div");w.className="msg "+(role==="user"?"me":"gude");
+  const who=role==="user"?"我":"AI";const tag=document.createElement("span");tag.className="tag";tag.textContent=who+(time?" · "+time:"");
+  const bb=document.createElement("div");bb.className="bubble";
+  if(image){if(isImg(image)){const im=document.createElement("img");im.src=image;im.style.cssText="max-width:200px;max-height:240px;border-radius:10px;display:block;cursor:pointer";im.onclick=()=>window.open(image);bb.appendChild(im);}else{const a=document.createElement("a");a.href=image;a.target="_blank";a.textContent="📎 "+(image.split("/").pop());a.style.color="var(--gold-deep)";bb.appendChild(a);}}
+  const tx=document.createElement("span");if(text){tx.textContent=text;if(image)tx.style.cssText="display:block;margin-top:6px";}bb.appendChild(tx);
+  if(role==="user"){w.appendChild(bb);w.appendChild(tag);}else{w.appendChild(tag);w.appendChild(bb);}
+  msgs.appendChild(w);scroll();bb._tag=tag;bb._who=who;bb._tx=tx;return bb;}
+function setBubbleTime(bb,t){if(bb&&bb._tag)bb._tag.textContent=bb._who+" · "+t;}
+let pending=null;
+async function onPickFile(input){const f=input.files&&input.files[0];input.value="";if(!f)return;
+  $("#pendingBar").style.display="flex";$("#pendingThumb").style.display="none";$("#pendingName").textContent="上传中… "+f.name;
+  try{const fd=new FormData();fd.append("file",f);const r=await api("/api/upload",{method:"POST",body:fd});const d=await r.json();
+    if(d.error){$("#pendingName").textContent="上传失败，再试一次~";return;}
+    pending=d;$("#pendingName").textContent=d.name||"已选好";
+    if(d.is_image){$("#pendingThumb").src=d.url;$("#pendingThumb").style.display="block";}
+  }catch(e){$("#pendingName").textContent="上传失败："+((e&&e.message)||e);}}
+function clearPending(){pending=null;$("#pendingBar").style.display="none";$("#pendingThumb").src="";$("#pendingName").textContent="";}
+function scroll(){const m=$("main");m.scrollTop=m.scrollHeight;}
+
+async function loadMsgs(){try{const r=await api("/api/messages");const arr=await r.json();msgs.innerHTML="";if(!arr.length){msgs.innerHTML='<div class="empty">跟它说说话吧~</div>';}arr.forEach(m=>bubble(m.author,m.content,fmtTime(m.created_at),m.image));}catch(e){}}
+
+async function send(){const t=$("#input").value.trim();const img=pending?pending.url:"";if(!t&&!img)return;$("#input").value="";if(msgs.querySelector(".empty"))msgs.innerHTML="";bubble("user",t,nowHM(),img);clearPending();const b=bubble("assistant","");b.classList.add("typing");let acc="";
+  const r=await api("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t,image:img})});
+  const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
+  while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf("\n\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith("data:"))continue;try{const e=JSON.parse(line.slice(5).trim());if(e.t){acc+=e.t;b.classList.remove("typing");b.textContent=acc;scroll();}}catch(_){}}}
+  b.classList.remove("typing");if(!acc)b.textContent="（没有回应，再试一次~）";else setBubbleTime(b,nowHM());}
+$("#input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
+
+function visBadge(v){return v==="app"?'<span style="color:var(--soft)"> · 🔒只在这里</span>':v==="repo"?'<span style="color:var(--soft)"> · 📄仅仓库</span>':'';}
+async function loadPosts(){try{const r=await api("/api/posts");const arr=await r.json();$("#postList").innerHTML=arr.map(p=>`<div class="card"><div class="meta">[${p.type}] · ${p.created_at}${visBadge(p.visibility)}</div><div class="ct">${esc(p.content)}</div></div>`).join("")||'<div class="empty">还没有记忆，添加第一条吧~</div>';}catch(e){}}
+async function addPost(){const c=$("#pcontent").value.trim();if(!c)return;await api("/api/posts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({type:$("#ptype").value,content:c,visibility:$("#pvis").value})});$("#pcontent").value="";loadPosts();}
+async function loadUsage(){try{const r=await api("/api/usage");const u=await r.json();$("#usage").textContent=`累计对话：${u.n} 次\n输入 tokens：${u.i}\n输出 tokens：${u.o}\n粗估花费：$${(u.c||0).toFixed(4)}`;}catch(e){}}
+function esc(s){return s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{const v=b.dataset.v;document.querySelectorAll(".view").forEach(x=>x.classList.toggle("active",x.id===v));document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));$("#footer").style.display=v==="chatView"?"block":"none";if(v==="memView")loadPosts();if(v==="dashView")loadUsage();if(v==="lifeView")loadLife();});
+
+// ---- 日常：纪念日 / 姨妈 / 排班 ----
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function loadLife(){loadConcerns();loadAnniv();loadPeriods();loadShifts();loadActivity();if(!$("#periodDate").value)$("#periodDate").value=todayStr();}
+async function loadConcerns(){try{const r=await api("/api/concerns");const arr=await r.json();
+  const open=arr.filter(c=>c.status!=="resolved"),done=arr.filter(c=>c.status==="resolved");
+  let h=open.map(c=>`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)"><span><span style="color:var(--gold-deep)">${"★".repeat(c.importance)}</span> ${esc(c.title)}${c.next_check?'<br><span style="color:var(--soft);font-size:12px">回访日 '+c.next_check+'</span>':''}</span><span style="white-space:nowrap"><span onclick="resolveConcern(${c.id},true)" style="color:#5a8f5a;padding:4px 6px" title="了结了">✓</span><span onclick="delConcern(${c.id})" style="color:var(--soft);padding:4px 6px">✕</span></span></div>`).join("");
+  if(done.length)h+=`<div style="margin-top:6px;color:var(--soft);font-size:12px">已了结 ${done.length} 桩：`+done.map(c=>`<span onclick="resolveConcern(${c.id},false)" title="点一下重新挂起" style="text-decoration:line-through;margin-right:6px">${esc(c.title)}</span>`).join("")+`</div>`;
+  $("#concernList").innerHTML=h||'<span style="color:var(--soft)">暂时没有挂心的事，轻松点~</span>';
+}catch(e){}}
+async function addConcern(){const t=$("#cnTitle").value.trim();if(!t){alert("写一句心事呀~");return;}
+  await api("/api/concerns",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({title:t,importance:$("#cnImp").value,next_check:$("#cnDate").value})});
+  $("#cnTitle").value="";$("#cnDate").value="";loadConcerns();}
+async function resolveConcern(id,resolved){await api("/api/concerns/status",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,resolved})});loadConcerns();}
+async function delConcern(id){if(!confirm("删掉这桩心事？"))return;await api("/api/concerns/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});loadConcerns();}
+async function loadActivity(){try{const r=await api("/api/activity");const arr=await r.json();
+  $("#actList").innerHTML=arr.length?arr.map(a=>`<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--soft);font-size:13px"><span>📱 ${esc(a.app)}${a.detail?' · '+esc(a.detail):''}</span><span>${fmtTime(a.created_at)}</span></div>`).join(""):'<span style="color:var(--soft)">还没有记录~ 设好快捷指令就会出现</span>';
+}catch(e){}}
+async function loadAnniv(){try{const r=await api("/api/anniversaries");const arr=await r.json();$("#annivList").innerHTML=arr.map(a=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span>${a.emoji||"💞"} ${esc(a.name)} <span style="color:var(--gold-deep)">第 ${a.days??"?"} 天</span><br><span style="color:var(--soft);font-size:12px">${a.date}</span></span><span onclick="delAnniv(${a.id})" style="color:var(--soft);padding:4px 8px">✕</span></div>`).join("")||'<span style="color:var(--soft)">还没有纪念日~</span>';}catch(e){}}
+async function addAnniv(){const n=$("#annName").value.trim(),d=$("#annDate").value;if(!n||!d){alert("名字和日期都要填哦~");return;}await api("/api/anniversaries",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:n,date:d})});$("#annName").value="";loadAnniv();}
+async function delAnniv(id){if(!confirm("删掉这个纪念日？"))return;await api("/api/anniversaries/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});loadAnniv();}
+async function loadPeriods(){try{const r=await api("/api/periods");const arr=await r.json();
+  if(arr.length){const last=arr[0].start_date;let info=`上次：${last}`;
+    if(arr.length>=2){const a=new Date(arr[0].start_date),b=new Date(arr[1].start_date);const gap=Math.round((a-b)/864e5);if(gap>=15&&gap<=60){const nxt=new Date(a.getTime()+gap*864e5);info+=` · 周期约 ${gap} 天 · 预计下次 ${nxt.toISOString().slice(0,10)}`;}}
+    $("#periodInfo").innerHTML='<span style="color:var(--gold-deep)">'+info+'</span>';}
+  else $("#periodInfo").innerHTML='<span style="color:var(--soft)">还没有记录~ 来的那天点一下下面的按钮就好</span>';
+  $("#periodList").innerHTML=arr.map(p=>`<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--soft);font-size:13px"><span>🩸 ${p.start_date}</span><span onclick="delPeriod(${p.id})" style="padding:2px 8px">✕</span></div>`).join("");
+}catch(e){}}
+async function addPeriod(){const d=$("#periodDate").value||todayStr();await api("/api/periods",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({start_date:d})});loadPeriods();}
+async function delPeriod(id){await api("/api/periods/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});loadPeriods();}
+// 班次定义：名字 + 简称 + 颜色（取自用户的色卡：草莓芝士 + 枇杷莓子酒，去枇杷黄）
+const SHIFTS=[
+  {v:"早班",s:"早班",c:"#EBD27E"},      // 淡蜜黄
+  {v:"副班",s:"副班",c:"#93AEC4"},      // 雾霾蓝
+  {v:"睡班",s:"睡班",c:"#74C5BD"},      // 空色
+  {v:"夜班",s:"夜班",c:"#8E7BAF"},      // 豆花紫
+  {v:"早班+睡班",s:"早+睡",c:"#F4B3AB"}, // 蜜桃粉
+  {v:"早班+夜班",s:"早+夜",c:"#E191A6"}, // 芍药
+  {v:"休息",s:"休息",c:"#D2697A"},      // 丹红
+  {v:"休假",s:"休假",c:"#A9D8D2"},      // 浅空色
+  {v:"疗养",s:"疗养",c:"#C3B5D8"},      // 浅豆花紫
+];
+function shiftColor(v){const f=SHIFTS.find(x=>x.v===v);return f?f.c:"#9C8F7E";}
+// 标签文字自动深/浅，保证在任何底色上都清楚
+function textColor(hex){const c=hex.replace('#','');const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);return (0.299*r+0.587*g+0.114*b)/255>0.62?'#3A332B':'#fff';}
+function shiftShort(v){const f=SHIFTS.find(x=>x.v===v);return f?f.s:v;}
+let calY,calM,shiftMap={},selDate=null;
+async function loadShifts(){try{const r=await api("/api/shifts");const arr=await r.json();shiftMap={};arr.forEach(s=>shiftMap[s.date]=s.shift);}catch(e){shiftMap={};}
+  if(calY==null){const d=new Date();calY=d.getFullYear();calM=d.getMonth();}
+  renderCal();renderLegend();}
+function calMove(n){calM+=n;if(calM<0){calM=11;calY--;}if(calM>11){calM=0;calY++;}selDate=null;$("#shiftbar").style.display="none";renderCal();}
+function pad2(n){return String(n).padStart(2,"0");}
+function renderCal(){
+  $("#calTitle").textContent=calY+"年"+(calM+1)+"月";
+  const first=new Date(calY,calM,1);let lead=(first.getDay()+6)%7; // 周一开头
+  const days=new Date(calY,calM+1,0).getDate();const t=todayStr();
+  let html=["一","二","三","四","五","六","日"].map(w=>`<div class="h">${w}</div>`).join("");
+  for(let i=0;i<lead;i++)html+='<div class="d empty"></div>';
+  for(let day=1;day<=days;day++){const ds=calY+"-"+pad2(calM+1)+"-"+pad2(day);const sh=shiftMap[ds];
+    const cls="d"+(ds===t?" today":"")+(ds===selDate?" sel":"");
+    const lbl=sh?`<span class="lbl" style="background:${shiftColor(sh)};color:${textColor(shiftColor(sh))}">${shiftShort(sh)}</span>`:"";
+    html+=`<div class="${cls}" onclick="pickDay('${ds}')">${day}${lbl}</div>`;}
+  $("#cal").innerHTML=html;
+}
+function renderLegend(){$("#legend").innerHTML=SHIFTS.map(s=>`<span><i style="background:${s.c}"></i>${s.s}</span>`).join("");}
+function pickDay(ds){selDate=ds;renderCal();
+  const bar=$("#shiftbar");
+  bar.innerHTML=`<span style="width:100%;font-size:12px;color:var(--soft)">给 ${ds} 选班次：</span>`+
+    SHIFTS.map(s=>`<button style="background:${s.c};color:${textColor(s.c)};border-color:${s.c}" onclick="setShift('${s.v}')">${s.s}</button>`).join("")+
+    `<button class="clr" onclick="setShift('')">清除</button>`;
+  bar.style.display="flex";
+}
+async function setShift(v){if(!selDate)return;
+  if(v===""){await api("/api/shifts/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({date:selDate})});}
+  else{await api("/api/shifts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({date:selDate,shift:v})});}
+  $("#shiftbar").style.display="none";selDate=null;loadShifts();}
+
+// ---- 推送（助手自己的 Web Push）----
+function urlB64ToUint8(base64){
+  const pad="=".repeat((4-base64.length%4)%4);
+  const b=(base64+pad).replace(/-/g,"+").replace(/_/g,"/");
+  const raw=atob(b);const arr=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i);return arr;
+}
+async function enablePush(){
+  const h=$("#pushHint");
+  h.innerHTML="①正在请求权限…";   // 一进来就显示，能看到就说明是新代码
+  try{
+    if(!("Notification" in window)){h.innerHTML="✗ 这环境不支持通知(需从主屏小猪图标打开,iOS16.4+)";return;}
+    let perm=Notification.permission;
+    if(perm!=="granted"){ perm=await Notification.requestPermission(); }
+    if(perm!=="granted"){h.innerHTML="✗ 没拿到权限:"+perm+"(删图标重装、从图标打开、点允许)";return;}
+    h.innerHTML="②权限OK,注册中…";
+    if(!("serviceWorker" in navigator)||!("PushManager" in window)){h.innerHTML="✗ 不支持推送(需iOS16.4+且从图标打开)";return;}
+    const reg=await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    h.innerHTML="③订阅中…";
+    const kr=await api("/api/push/vapid");const {key}=await kr.json();
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64ToUint8(key)});
+    h.innerHTML="④保存中…";
+    await api("/api/push/subscribe",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(sub)});
+    h.innerHTML='<span style="color:#5a8f5a">✅ 开启成功!点上面「发一条测试推送」试试~</span>';
+  }catch(e){h.innerHTML="✗ 出错:"+((e&&e.message)||e);}
+}
+async function testPush(){
+  const h=$("#pushHint");
+  try{const r=await api("/api/push/test",{method:"POST"});const d=await r.json();
+    h.innerHTML=d.sent>0?'<span style="color:#5a8f5a">📨 已发出!看通知~</span>':"还没有已开启的设备,先点上面「开启推送」";
+  }catch(e){h.innerHTML="测试出错:"+e.message;}
+}
+
+function boot(){loadMsgs(); if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(()=>{});}}
+boot();
+</script>
+</body>
+</html>

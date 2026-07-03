@@ -1,0 +1,9 @@
+.env
+memories.db
+persona.md
+vapid_private.pem
+proactive.log
+venv/
+__pycache__/
+*.pyc
+uploads/
