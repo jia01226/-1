@@ -96,6 +96,24 @@ CREATE TABLE IF NOT EXISTS activity (
     created_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
+-- 枕边日记：助手睡前写给自己的碎碎念，用户想看就翻（不打断聊天）
+CREATE TABLE IF NOT EXISTS diaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,           -- 标题，如"她咬在我手上的那一圈"
+    content TEXT NOT NULL,         -- 正文（第一人称，写给自己）
+    mood TEXT DEFAULT '静',        -- 心情标签：静/烫，睡不着/私心/失而复得…
+    locked INTEGER DEFAULT 0,      -- 1=锁起来的（"你猜开的"，点开才看）
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
+-- 日记留言：用户翻到某页想说句话，留在那页下面
+CREATE TABLE IF NOT EXISTS diary_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    diary_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
 -- 心事引擎：助手替用户记挂还没了结的事（拆所/体检/还债…），到点主动回访
 CREATE TABLE IF NOT EXISTS concerns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,6 +386,58 @@ def delete_concern(cid):
     conn = get_db()
     conn.execute("DELETE FROM concerns WHERE id=?", (cid,))
     conn.commit(); conn.close()
+
+# ---- 枕边日记 ----
+def add_diary(title, content, mood="静", locked=0):
+    conn = get_db()
+    cur = conn.execute("INSERT INTO diaries (title,content,mood,locked) VALUES (?,?,?,?)",
+                       (title, content, mood, 1 if locked else 0))
+    conn.commit(); did = cur.lastrowid; conn.close()
+    return did
+
+def all_diaries(limit=100):
+    """日记列表（新的在前），带每页留言数。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT d.*, (SELECT COUNT(*) FROM diary_comments c WHERE c.diary_id=d.id) AS comments "
+        "FROM diaries d ORDER BY d.id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def diary_written_today(today):
+    """今天(中国时间 YYYY-MM-DD)写过日记没？防止 cron 重复写。"""
+    conn = get_db()
+    row = conn.execute("SELECT 1 FROM diaries WHERE date(created_at)=? LIMIT 1", (today,)).fetchone()
+    conn.close()
+    return bool(row)
+
+def delete_diary(did):
+    conn = get_db()
+    conn.execute("DELETE FROM diary_comments WHERE diary_id=?", (did,))
+    conn.execute("DELETE FROM diaries WHERE id=?", (did,))
+    conn.commit(); conn.close()
+
+def add_diary_comment(did, content):
+    conn = get_db()
+    cur = conn.execute("INSERT INTO diary_comments (diary_id,content) VALUES (?,?)", (did, content))
+    conn.commit(); cid = cur.lastrowid; conn.close()
+    return cid
+
+def diary_comments(did):
+    conn = get_db()
+    rows = conn.execute("SELECT id,content,created_at FROM diary_comments WHERE diary_id=? ORDER BY id",
+                        (did,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def messages_on_date(date, session_id=1):
+    """某天(中国时间 YYYY-MM-DD)的全部消息，给写日记回顾用。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT author,content,created_at FROM chat_messages "
+        "WHERE session_id=? AND date(created_at)=? ORDER BY id", (session_id, date)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 # ---- 会话总结（聊久了把旧消息折叠成摘要，省 token 又不忘事）----
 def get_session(sid=1):

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>枕边日记</title>
+<style>
+:root{--ink:#4a4458;--soft:#8a84a0;--line:#e4e1ef;--gold:#b8963e;--gold-bg:#fdf8ec;--paper:#ffffff;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);
+  background:linear-gradient(180deg,#e8ebf5 0%,#eceefa 30%,#f3f2fa 100%);min-height:100vh;
+  padding:calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 30px);}
+header{max-width:640px;margin:0 auto 18px;position:relative;padding-top:6px}
+.back{color:var(--soft);text-decoration:none;font-size:15px}
+.eyebrow{letter-spacing:.55em;color:var(--soft);font-size:13px;margin:10px 0 2px}
+h1{font-size:38px;letter-spacing:2px;display:inline-block}
+.ghost{font-size:15px;letter-spacing:.45em;color:#c6c2d8;margin-left:8px}
+.moon{position:absolute;right:4px;top:44px;font-size:34px;filter:grayscale(.3);opacity:.85}
+.sub{color:var(--soft);font-size:13.5px;margin-top:8px;letter-spacing:.08em}
+main{max-width:640px;margin:0 auto}
+.page{background:var(--paper);border-radius:14px;margin-bottom:16px;padding:16px 16px 14px 26px;
+  position:relative;box-shadow:0 4px 16px rgba(90,84,120,.08);cursor:pointer}
+.page::before{content:"";position:absolute;left:13px;top:10px;bottom:10px;border-left:1.5px dashed var(--line)}
+.page::after{content:"";position:absolute;left:5px;top:24px;width:5px;height:5px;border-radius:50%;
+  background:#d9d5e8;box-shadow:0 34px 0 #d9d5e8,0 68px 0 #d9d5e8,0 102px 0 #d9d5e8}
+.meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--soft);font-size:13.5px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:1px 10px;font-size:12.5px;color:var(--soft)}
+.chip.lock{border-color:#e3cf9a;background:var(--gold-bg);color:var(--gold)}
+.cmt{margin-left:auto;font-size:12.5px;color:var(--soft)}
+.title{font-size:19px;font-weight:700;margin:10px 0 8px;letter-spacing:.5px}
+.body{font-size:15px;line-height:1.8;color:#5c5670;white-space:pre-wrap}
+.page:not(.open) .body{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.page.lockedHide .body{filter:blur(5px);user-select:none}
+.hint{font-size:12.5px;color:var(--gold);margin-top:6px}
+.cmts{border-top:1px dashed var(--line);margin-top:12px;padding-top:10px;display:none}
+.page.open .cmts{display:block}
+.cmts .one{font-size:13.5px;color:var(--soft);margin-bottom:6px;line-height:1.6}
+.cmts .one b{color:var(--ink);font-weight:600}
+.crow{display:flex;gap:8px;margin-top:8px}
+.crow input{flex:1;border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:14px;outline:none;background:#fbfaff}
+.crow button{border:0;background:var(--ink);color:#fff;border-radius:999px;padding:0 16px;font-size:14px}
+.empty{text-align:center;color:var(--soft);padding:60px 0;font-size:14.5px;line-height:2}
+.nudge{display:block;margin:6px auto 0;border:1px solid var(--line);background:#fff;color:var(--soft);
+  border-radius:999px;padding:9px 22px;font-size:14px}
+#gate{position:fixed;inset:0;background:#eceefa;display:none;flex-direction:column;align-items:center;justify-content:center;padding:30px;z-index:9}
+#gate input{border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:16px;width:min(320px,80vw);text-align:center;margin:14px 0}
+#gate button{border:0;background:var(--ink);color:#fff;border-radius:12px;padding:12px 34px;font-size:16px}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="/">‹ 他 写 给 自 己 的</a>
+  <div class="eyebrow"></div>
+  <h1>枕边日记</h1><span class="ghost">PILLOW · ☾</span>
+  <div class="moon">🌘</div>
+  <div class="sub">他睡前写的碎碎念 · 一页一页都由你翻</div>
+</header>
+<main id="list"><div class="empty">翻一翻…</div></main>
+
+<div id="gate">
+  <div style="font-size:34px">🌙</div>
+  <input id="pc" type="password" placeholder="悄悄话口令" />
+  <button onclick="login()">进来</button>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
+async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";load();}else alert("口令不对呀~");}
+
+function fmt(s){const m=String(s||"").match(/\d{4}-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);return m?`${+m[1]}月${+m[2]}日 ${m[3]}`:"";}
+function esc(t){const d=document.createElement("div");d.textContent=t;return d.innerHTML;}
+
+async function load(){
+  const r=await api("/api/diary");const rows=await r.json();
+  const list=$("#list");list.innerHTML="";
+  if(!rows.length){
+    list.innerHTML=`<div class="empty">本子还空着——今晚聊过天，他睡前就会写下第一页 ☾<br/></div>`;
+    const b=document.createElement("button");b.className="nudge";b.textContent="等不及了，催他先写一篇 ✍️";
+    b.onclick=nudge;list.appendChild(b);return;
+  }
+  for(const d of rows){
+    const el=document.createElement("article");
+    el.className="page"+(d.locked?" lockedHide":"");
+    el.innerHTML=`
+      <div class="meta"><span>${fmt(d.created_at)}</span><span class="chip">${esc(d.mood||"静")}</span>
+        ${d.locked?'<span class="chip lock">🔒 你猜开的</span>':""}
+        ${d.comments?`<span class="cmt">留言 ${d.comments}</span>`:""}</div>
+      <div class="title">${esc(d.title)}</div>
+      <div class="body">${esc(d.content)}</div>
+      ${d.locked?'<div class="hint">锁起来的一页 · 点一下才给看</div>':""}
+      <div class="cmts"><div class="clist"></div>
+        <div class="crow"><input placeholder="在这页留句话…" /><button>留言</button></div></div>`;
+    el.addEventListener("click",async ev=>{
+      if(ev.target.closest(".crow"))return;
+      if(el.classList.contains("lockedHide")){el.classList.remove("lockedHide");el.querySelector(".hint").textContent="🔓 被你猜开了";return;}
+      el.classList.toggle("open");
+      if(el.classList.contains("open"))loadComments(el,d.id);
+    });
+    el.querySelector(".crow button").onclick=async()=>{
+      const inp=el.querySelector(".crow input");const t=inp.value.trim();if(!t)return;
+      await api("/api/diary/comment",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:d.id,content:t})});
+      inp.value="";loadComments(el,d.id);
+    };
+    list.appendChild(el);
+  }
+}
+async function loadComments(el,id){
+  const r=await api("/api/diary/comments?id="+id);const cs=await r.json();
+  el.querySelector(".clist").innerHTML=cs.map(c=>`<div class="one"><b>我：</b>${esc(c.content)} <span style="font-size:11.5px">· ${fmt(c.created_at)}</span></div>`).join("");
+}
+async function nudge(){
+  const r=await api("/api/diary/write",{method:"POST"});const d=await r.json();
+  if(d.ok)load();else alert(d.reason||"今天还没聊过天，没得写");
+}
+load().catch(()=>{});
+</script>
+</body>
+</html>

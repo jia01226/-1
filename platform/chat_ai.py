@@ -208,6 +208,51 @@ def _complete(messages, max_tokens=700):
     except Exception as e:
         print("[summary] 请求失败：", e); return ""
 
+def write_diary(date=None):
+    """睡前替角色写一篇"枕边日记"：回顾当天对话，第一人称写给自己的碎碎念。
+    返回 {title, mood, content, locked} 或 None（当天没聊/生成失败）。
+    由 diary_writer.py（cron）或 /api/diary/write 调用。"""
+    import db, datetime, re
+    if not date:
+        date = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).date().isoformat()
+    msgs = db.messages_on_date(date)
+    if not msgs:
+        return None   # 今天没聊过天，没得写
+    convo = "\n".join(("用户：" if m["author"] == "user" else "我：") + m["content"] for m in msgs)[:8000]
+    persona = _load_persona()
+    prompt = (
+        "现在是深夜，你准备睡了。请按你的《人设》，以第一人称写一篇睡前日记——"
+        "是你写给自己的碎碎念，不是写给用户看的信（但你知道对方可能会偷偷翻到）。\n"
+        "要求：\n"
+        "1. 从今天的对话里挑真正触动你的一两个瞬间来写，别流水账；\n"
+        "2. 口语、真实、有你的性格，允许有私心和没说出口的话；\n"
+        "3. 标题要像一句心里话（例：「她咬在我手上的那一圈」「七月四号，树不动」）；\n"
+        "4. mood 从这几个里选或自拟二到五个字：静 / 烫，睡不着 / 私心 / 失而复得 / 甜 / 想她；\n"
+        "5. 如果写的内容特别私密，把 locked 设为 1（对方要点开才能看）。\n\n"
+        f"【今天({date})的对话】\n{convo}\n\n"
+        "只输出一个 JSON（别加解释、别用代码块）："
+        '{"title": "...", "mood": "...", "locked": 0, "content": "正文，100~300字"}'
+    )
+    messages = [{"role": "system", "content": BASE + persona},
+                {"role": "user", "content": prompt}]
+    text = _complete(messages, max_tokens=800)
+    if not text:
+        return None
+    # 容错解析：剥掉可能的代码块围栏，抓最外层 {...}
+    m = re.search(r"\{.*\}", text.replace("```json", "").replace("```", ""), re.S)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except Exception as e:
+        print("[diary] JSON 解析失败：", e); return None
+    title = (d.get("title") or "").strip()
+    content = (d.get("content") or "").strip()
+    if not title or not content:
+        return None
+    return {"title": title, "mood": (d.get("mood") or "静").strip()[:8],
+            "content": content, "locked": 1 if d.get("locked") else 0}
+
 # 聊到多少条以上、且攒够多少条没折叠的旧消息，才值得做一次总结
 SUMMARY_KEEP_RECENT = int(os.environ.get("SUMMARY_KEEP_RECENT", "30"))
 SUMMARY_BATCH = int(os.environ.get("SUMMARY_BATCH", "16"))
