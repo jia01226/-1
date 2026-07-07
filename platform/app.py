@@ -174,6 +174,32 @@ def api_track():
 @guard
 def api_activity(): return jsonify(db.recent_activity(limit=50))
 
+# ---- 健康数据（Apple Watch/快捷指令上报；主权在用户：装哪条指令才有哪类数据）----
+@app.route("/api/health", methods=["POST", "GET"])
+def api_health_report():
+    d = request.get_json(silent=True) or request.form or {}
+    metric = (d.get("metric") or request.args.get("metric") or "").strip()
+    value = d.get("value") or request.args.get("value")
+    token = (d.get("token") or request.args.get("token") or "").strip()
+    need = os.environ.get("TRACK_TOKEN", "").strip() or PASSCODE
+    if need and token != need:
+        return jsonify({"error": "bad token"}), 403
+    if not metric or value is None:
+        # GET 且没带参数时当查看用（需登录态）
+        if request.method == "GET" and not metric:
+            if PASSCODE and not session.get("ok"):
+                return jsonify({"error": "need_passcode"}), 401
+            return jsonify(db.recent_health(limit=50))
+        return jsonify({"error": "need metric+value"}), 400
+    try:
+        value = float(value)
+    except Exception:
+        return jsonify({"error": "value must be number"}), 400
+    hid = db.add_health(metric, value,
+                        (d.get("unit") or request.args.get("unit") or "").strip(),
+                        (d.get("detail") or request.args.get("detail") or "").strip())
+    return jsonify({"ok": True, "id": hid})
+
 # ---- 纪念日 / 姨妈 / 排班（日常）----
 @app.get("/api/anniversaries")
 @guard
@@ -276,6 +302,93 @@ def api_concern_status():
 @guard
 def api_concern_del():
     db.delete_concern((request.json or {}).get("id"))
+    return jsonify({"ok": True})
+
+# ---- 图片/文件管理（清废图，留纪念图）----
+@app.get("/photos")
+def photos_page(): return send_from_directory(STATIC, "photos.html")
+
+@app.get("/api/uploads/list")
+@guard
+def api_uploads_list():
+    """uploads 里的全部文件：名字/大小/时间/是否在聊天里用过。新的在前。"""
+    used = db.referenced_images()
+    out = []
+    for name in os.listdir(UPLOAD_DIR):
+        fp = os.path.join(UPLOAD_DIR, name)
+        if not os.path.isfile(fp):
+            continue
+        st = os.stat(fp)
+        out.append({"name": name, "url": "/uploads/" + name,
+                    "size": st.st_size, "mtime": int(st.st_mtime),
+                    "is_image": os.path.splitext(name)[1].lower() in IMG_EXT,
+                    "used": name in used})
+    out.sort(key=lambda x: -x["mtime"])
+    return jsonify(out)
+
+def _safe_remove(name):
+    """只删 uploads 目录里的普通文件，别的路径一律不碰。"""
+    name = os.path.basename(name or "")
+    fp = os.path.join(UPLOAD_DIR, name)
+    if name and os.path.isfile(fp):
+        os.remove(fp); return True
+    return False
+
+@app.post("/api/uploads/delete")
+@guard
+def api_uploads_delete():
+    names = (request.json or {}).get("names") or []
+    n = sum(1 for x in names if _safe_remove(x))
+    return jsonify({"deleted": n})
+
+@app.post("/api/uploads/clean_unused")
+@guard
+def api_uploads_clean_unused():
+    """一键清"聊天里没用到的"（废图/截图）。用过的（=有回忆的）绝不动。"""
+    used = db.referenced_images()
+    n = 0
+    for name in os.listdir(UPLOAD_DIR):
+        if name not in used and os.path.isfile(os.path.join(UPLOAD_DIR, name)):
+            os.remove(os.path.join(UPLOAD_DIR, name)); n += 1
+    return jsonify({"deleted": n})
+
+# ---- 枕边日记（助手写给自己的，用户想看就翻）----
+@app.get("/diary")
+def diary_page(): return send_from_directory(STATIC, "diary.html")
+
+@app.get("/api/diary")
+@guard
+def api_diary(): return jsonify(db.all_diaries())
+
+@app.get("/api/diary/comments")
+@guard
+def api_diary_comments():
+    did = request.args.get("id")
+    return jsonify(db.diary_comments(did))
+
+@app.post("/api/diary/comment")
+@guard
+def api_diary_comment():
+    d = request.json or {}
+    content = (d.get("content") or "").strip()
+    if not d.get("id") or not content:
+        return jsonify({"error": "need id+content"}), 400
+    return jsonify({"id": db.add_diary_comment(d["id"], content)})
+
+@app.post("/api/diary/write")
+@guard
+def api_diary_write():
+    """手动催一篇今天的日记（平时由 cron 半夜自动写）。"""
+    entry = chat_ai.write_diary()
+    if not entry:
+        return jsonify({"ok": False, "reason": "今天还没聊过天，没得写"}), 200
+    did = db.add_diary(entry["title"], entry["content"], entry["mood"], entry["locked"])
+    return jsonify({"ok": True, "id": did, "title": entry["title"]})
+
+@app.post("/api/diary/delete")
+@guard
+def api_diary_delete():
+    db.delete_diary((request.json or {}).get("id"))
     return jsonify({"ok": True})
 
 # ---- Web Push（助手自己的推送）----
