@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>共读</title>
+<style>
+:root{--bg1:#FBF8F1;--bg2:#F6EFE2;--blob1:rgba(201,168,106,.32);--blob2:rgba(232,196,160,.35);
+  --ink:#4A4138;--soft:#9C8F7E;--gold:#B8924E;--line:rgba(255,255,255,.65);
+  --glass:rgba(255,255,255,.55);--glass2:rgba(255,255,255,.38);--shadow:0 8px 32px rgba(150,120,70,.14);
+  --me:rgba(243,231,207,.6);--ta:rgba(230,222,246,.55)}
+html[data-theme="sakura"]{--bg1:#FBF3F5;--bg2:#F7E8EE;--blob1:rgba(224,148,171,.30);--blob2:rgba(244,196,210,.40);--ink:#54424b;--soft:#a8919b;--gold:#C2708A;--me:rgba(248,224,232,.6);--shadow:0 8px 32px rgba(196,120,146,.15)}
+html[data-theme="mist"]{--bg1:#F2F4F9;--bg2:#E9EDF6;--blob1:rgba(140,160,205,.28);--blob2:rgba(180,196,230,.38);--ink:#454b5c;--soft:#8d94a8;--gold:#7189BC;--me:rgba(223,231,246,.6);--shadow:0 8px 32px rgba(110,132,180,.15)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);min-height:100vh;
+  background:linear-gradient(165deg,var(--bg1),var(--bg2));padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 30px)}
+body::before,body::after{content:"";position:fixed;border-radius:50%;filter:blur(70px);z-index:-1}
+body::before{width:46vh;height:46vh;top:-12vh;right:-14vh;background:var(--blob1)}
+body::after{width:52vh;height:52vh;bottom:-16vh;left:-16vh;background:var(--blob2)}
+header{max-width:680px;margin:0 auto 14px}
+.back{color:var(--soft);text-decoration:none;font-size:15px;background:none;border:none;font-family:inherit}
+h1{font-size:24px;margin:8px 0 2px}
+.sub{color:var(--soft);font-size:13px}
+main{max-width:680px;margin:0 auto}
+.card{background:var(--glass);backdrop-filter:blur(16px) saturate(1.5);-webkit-backdrop-filter:blur(16px) saturate(1.5);
+  border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.card h2{font-size:15px;color:var(--gold);margin-bottom:8px}
+input,textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:12px;font-size:15px;font-family:inherit;outline:none;margin-top:8px;background:var(--glass2);color:var(--ink)}
+textarea{min-height:120px;resize:vertical}
+.btn{width:100%;margin-top:12px;padding:12px;border:none;border-radius:12px;background:var(--gold);color:#fff;font-size:15px}
+.item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.item .t{flex:1}.item .t b{font-size:16px}.item .t span{font-size:12px;color:var(--soft)}
+.item .go{color:var(--gold)}
+.para{position:relative;font-size:16px;line-height:2;margin:2px 0;padding:6px 8px;border-radius:8px;text-indent:2em}
+.para:active{background:var(--glass2)}
+.anno{margin:6px 0 12px;padding:0 4px}
+.anno .a{border-radius:10px;padding:8px 12px;font-size:14px;line-height:1.7;margin-top:6px}
+.anno .a.me{background:var(--me);border:1px solid var(--line)}
+.anno .a.ta{background:var(--ta);border:1px solid var(--line)}
+.anno .a .who{font-size:11.5px;color:var(--soft);margin-bottom:2px}
+.tools{display:flex;gap:8px;margin-top:6px}
+.tools button{flex:1;border:1px solid var(--line);background:var(--glass2);border-radius:10px;padding:7px 0;font-size:13px;color:var(--gold);font-family:inherit}
+.empty{text-align:center;color:var(--soft);padding:36px 0;line-height:2}
+#gate{position:fixed;inset:0;background:linear-gradient(165deg,var(--bg1),var(--bg2));display:none;flex-direction:column;align-items:center;justify-content:center;padding:30px;z-index:9}
+#gate input{width:min(320px,80vw);text-align:center}#gate button{border:0;background:var(--ink);color:#fff;border-radius:12px;padding:12px 34px;margin-top:14px}
+</style>
+<script>try{const t=localStorage.getItem("theme");if(t&&t!=="warm")document.documentElement.setAttribute("data-theme",t);}catch(_){}</script>
+</head>
+<body>
+<header>
+  <button class="back" onclick="showList()">‹ 返回</button>
+  <h1 id="ttl">📖 一起读</h1>
+  <div class="sub" id="sub">一段一段读，谁都能在旁边写一句</div>
+</header>
+<main id="main"></main>
+
+<div id="gate">
+  <div style="font-size:34px">📖</div>
+  <input id="pc" type="password" placeholder="悄悄话口令" />
+  <button onclick="login()">进来</button>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);let CUR=null,WHO="TA";
+async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
+async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";showList();}else alert("口令不对呀~");}
+function esc(t){const d=document.createElement("div");d.textContent=t;return d.innerHTML;}
+
+async function showList(){
+  CUR=null;$("#ttl").textContent="📖 一起读";$("#sub").textContent="一段一段读，谁都能在旁边写一句";
+  const rows=await(await api("/api/readings")).json();
+  $("#main").innerHTML=`
+    <div class="card"><h2>放一篇进来一起读 ✦</h2>
+      <input id="rTitle" placeholder="标题，比如《情人》节选" />
+      <input id="rAuthor" placeholder="作者（可不填）" />
+      <textarea id="rBody" placeholder="把要一起读的文字贴进来…（空行分段）"></textarea>
+      <button class="btn" onclick="addReading()">放进来</button>
+    </div>
+    ${rows.length?rows.map(r=>`<div class="card" style="padding:0 16px"><div class="item">
+        <div class="t" onclick="open_(${r.id})"><b>${esc(r.title)}</b><br><span>${r.author?esc(r.author)+' · ':''}${r.created_at.slice(0,10)}</span></div>
+        <span class="go" onclick="open_(${r.id})">读 ›</span>
+        <span onclick="delReading(${r.id})" style="color:var(--soft);padding:4px 8px">✕</span>
+      </div></div>`).join(''):'<div class="empty">还没有共读的篇目——<br/>贴一段你们都喜欢的文字吧 ✦</div>'}`;
+}
+async function addReading(){
+  const title=$("#rTitle").value.trim(),author=$("#rAuthor").value.trim(),body=$("#rBody").value.trim();
+  if(!title||!body)return alert("标题和正文要填哦~");
+  await api("/api/readings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({title,author,content:body})});
+  showList();
+}
+async function delReading(id){if(!confirm("删掉这篇和它的批注？"))return;await api("/api/readings/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});showList();}
+
+async function open_(id){
+  const r=await(await api("/api/reading?id="+id)).json();CUR=r;
+  $("#ttl").textContent=r.title;$("#sub").textContent=(r.author?r.author+" · ":"")+"点一段，写批注或请TA评";
+  render(r);
+}
+function render(r){
+  const byPara={};(r.annotations||[]).forEach(a=>{(byPara[a.para]=byPara[a.para]||[]).push(a);});
+  let h="";
+  r.paras.forEach((p,i)=>{
+    h+=`<div class="para" onclick="tools(${i})">${esc(p)}</div><div id="anno${i}" class="anno">`;
+    (byPara[i]||[]).forEach(a=>{h+=annoHtml(a);});
+    h+=`<div id="tools${i}" style="display:none"></div></div>`;
+  });
+  $("#main").innerHTML=`<div class="card">${h}</div>`;
+}
+function annoHtml(a){const me=a.author==="user";return `<div class="a ${me?'me':'ta'}"><div class="who">${me?'我':esc(a.author)}的批注</div>${esc(a.content)}</div>`;}
+function tools(i){
+  const box=$("#tools"+i);const open=box.style.display!=="none";
+  document.querySelectorAll("[id^=tools]").forEach(b=>b.style.display="none");
+  if(open)return;box.style.display="block";
+  box.innerHTML=`<div class="tools"><button onclick="myAnno(${i})">✍️ 我来写一句</button><button onclick="aiAnno(${i},this)">💭 请TA评一句</button></div>`;
+}
+async function myAnno(i){
+  const t=prompt("写下你在这段旁边想说的话");if(!t)return;
+  const d=await(await api("/api/reading/annotate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:CUR.id,para:i,content:t})})).json();
+  $("#tools"+i).insertAdjacentHTML("beforebegin",annoHtml(d));$("#tools"+i).style.display="none";
+}
+async function aiAnno(i,btn){
+  btn.textContent="想…";btn.disabled=true;
+  try{const d=await(await api("/api/reading/annotate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:CUR.id,para:i,ai:1})})).json();
+    if(d.content){$("#tools"+i).insertAdjacentHTML("beforebegin",annoHtml(d));$("#tools"+i).style.display="none";}
+    else alert(d.error||"没评出来，再试一次");
+  }catch(e){alert("网络开小差了~");}
+  btn.textContent="💭 请TA评一句";btn.disabled=false;
+}
+showList().catch(()=>{});
+</script>
+</body>
+</html>

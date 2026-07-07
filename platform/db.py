@@ -114,6 +114,35 @@ CREATE TABLE IF NOT EXISTS diary_comments (
     created_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
+-- 时间胶囊：把此刻的话/图封存给未来，到日子才开
+CREATE TABLE IF NOT EXISTS capsules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    image TEXT DEFAULT '',
+    open_at TEXT NOT NULL,         -- YYYY-MM-DD 开启日
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
+-- 共读：一篇读物（书摘/文章）
+CREATE TABLE IF NOT EXISTS readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    author TEXT DEFAULT '',
+    content TEXT NOT NULL,         -- 正文，按空行分段
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
+-- 共读批注：某篇读物某一段，谁写的一句话
+CREATE TABLE IF NOT EXISTS annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reading_id INTEGER NOT NULL,
+    para INTEGER NOT NULL,         -- 第几段（0起）
+    author TEXT NOT NULL,          -- 'user' / 角色名
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
 -- 心情记录（用户自己点的：今天什么心情，可带一句话）
 CREATE TABLE IF NOT EXISTS moods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -444,6 +473,66 @@ def delete_concern(cid):
     conn = get_db()
     conn.execute("DELETE FROM concerns WHERE id=?", (cid,))
     conn.commit(); conn.close()
+
+# ---- 时间胶囊 ----
+def add_capsule(title, content, open_at, image=""):
+    conn = get_db()
+    cur = conn.execute("INSERT INTO capsules (title,content,open_at,image) VALUES (?,?,?,?)",
+                       (title, content, open_at, image))
+    conn.commit(); cid = cur.lastrowid; conn.close()
+    return cid
+
+def all_capsules():
+    conn = get_db()
+    rows = conn.execute("SELECT id,title,content,image,open_at,created_at FROM capsules "
+                        "ORDER BY open_at").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def delete_capsule(cid):
+    conn = get_db()
+    conn.execute("DELETE FROM capsules WHERE id=?", (cid,))
+    conn.commit(); conn.close()
+
+# ---- 共读 ----
+def add_reading(title, author, content):
+    conn = get_db()
+    cur = conn.execute("INSERT INTO readings (title,author,content) VALUES (?,?,?)",
+                       (title, author, content))
+    conn.commit(); rid = cur.lastrowid; conn.close()
+    return rid
+
+def all_readings():
+    conn = get_db()
+    rows = conn.execute("SELECT id,title,author,created_at FROM readings ORDER BY id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_reading(rid):
+    conn = get_db()
+    row = conn.execute("SELECT id,title,author,content,created_at FROM readings WHERE id=?", (rid,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def delete_reading(rid):
+    conn = get_db()
+    conn.execute("DELETE FROM annotations WHERE reading_id=?", (rid,))
+    conn.execute("DELETE FROM readings WHERE id=?", (rid,))
+    conn.commit(); conn.close()
+
+def add_annotation(reading_id, para, author, content):
+    conn = get_db()
+    cur = conn.execute("INSERT INTO annotations (reading_id,para,author,content) VALUES (?,?,?,?)",
+                       (reading_id, para, author, content))
+    conn.commit(); aid = cur.lastrowid; conn.close()
+    return aid
+
+def reading_annotations(reading_id):
+    conn = get_db()
+    rows = conn.execute("SELECT id,para,author,content,created_at FROM annotations "
+                        "WHERE reading_id=? ORDER BY para, id", (reading_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 # ---- 心情记录 ----
 def add_mood(mood, note=""):

@@ -315,6 +315,101 @@ def api_shift_del():
     db.delete_shift((request.json or {}).get("date"))
     return jsonify({"ok": True})
 
+# ---- 时间胶囊 ----
+@app.get("/capsule")
+def capsule_page(): return send_from_directory(STATIC, "capsule.html")
+
+@app.get("/api/capsules")
+@guard
+def api_capsules():
+    import datetime
+    today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).date().isoformat()
+    out = []
+    for c in db.all_capsules():
+        opened = c["open_at"] <= today
+        out.append({**c, "opened": opened,
+                    # 没到开启日：藏正文和图，只留标题和倒计时
+                    "content": c["content"] if opened else "",
+                    "image": c["image"] if opened else "",
+                    "days_left": (datetime.date.fromisoformat(c["open_at"]) - datetime.date.fromisoformat(today)).days})
+    return jsonify(out)
+
+@app.post("/api/capsules")
+@guard
+def api_capsule_add():
+    d = request.json or {}
+    title = (d.get("title") or "").strip()
+    content = (d.get("content") or "").strip()
+    open_at = (d.get("open_at") or "").strip()
+    if not title or not content or not open_at:
+        return jsonify({"error": "need title+content+open_at"}), 400
+    return jsonify({"id": db.add_capsule(title, content, open_at, (d.get("image") or "").strip())})
+
+@app.post("/api/capsules/delete")
+@guard
+def api_capsule_del():
+    db.delete_capsule((request.json or {}).get("id"))
+    return jsonify({"ok": True})
+
+# ---- 共读 ----
+@app.get("/reading")
+def reading_page(): return send_from_directory(STATIC, "reading.html")
+
+@app.get("/api/readings")
+@guard
+def api_readings(): return jsonify(db.all_readings())
+
+@app.post("/api/readings")
+@guard
+def api_reading_add():
+    d = request.json or {}
+    title = (d.get("title") or "").strip()
+    content = (d.get("content") or "").strip()
+    if not title or not content:
+        return jsonify({"error": "need title+content"}), 400
+    return jsonify({"id": db.add_reading(title, (d.get("author") or "").strip(), content)})
+
+@app.get("/api/reading")
+@guard
+def api_reading_one():
+    r = db.get_reading(request.args.get("id"))
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    r["paras"] = [p for p in r["content"].split("\n") if p.strip()]
+    r["annotations"] = db.reading_annotations(r["id"])
+    return jsonify(r)
+
+@app.post("/api/readings/delete")
+@guard
+def api_reading_del():
+    db.delete_reading((request.json or {}).get("id"))
+    return jsonify({"ok": True})
+
+@app.post("/api/reading/annotate")
+@guard
+def api_reading_annotate():
+    """我写批注(author=user)，或请角色写(ai=1)。"""
+    d = request.json or {}
+    rid = d.get("id"); para = d.get("para")
+    if rid is None or para is None:
+        return jsonify({"error": "need id+para"}), 400
+    if d.get("ai"):
+        r = db.get_reading(rid)
+        paras = [p for p in (r["content"].split("\n") if r else []) if p.strip()]
+        if not r or para >= len(paras):
+            return jsonify({"error": "bad para"}), 400
+        who = os.environ.get("CHARACTER", "").strip() or "TA"
+        text = chat_ai.annotate_passage(r["title"], r["author"], paras[para])
+        if not text:
+            return jsonify({"error": "生成失败，再试一次"}), 200
+        aid = db.add_annotation(rid, para, who, text)
+        return jsonify({"id": aid, "author": who, "content": text})
+    content = (d.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "empty"}), 400
+    aid = db.add_annotation(rid, para, "user", content)
+    return jsonify({"id": aid, "author": "user", "content": content})
+
 # ---- 心情记录 ----
 @app.get("/api/moods")
 @guard
