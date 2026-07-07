@@ -393,6 +393,20 @@ def write_dream(date=None):
         return None
     return {"title": title, "mood": "梦", "content": content}
 
+def annotate_passage(title, author, para_text):
+    """共读批注：按《人设》给一段文字写一句短批注（像恋人在书页边写的话）。失败返回空串。"""
+    persona = _load_persona()
+    prompt = (
+        f"你在和对方共读《{title}》{('（'+author+'）') if author else ''}。"
+        "下面是其中一段。请按你的《人设》，在书页边给这段写一句**短批注**——"
+        "像恋人一起看书时，你在旁边轻声说的一句话：可以是感受、联想、或想对她说的。"
+        "别复述原文、别长篇、1~3句、有你的性格。\n\n"
+        f"【这一段】\n{para_text}\n\n直接输出你的批注本身，别加引号别加解释。"
+    )
+    messages = [{"role": "system", "content": BASE + persona},
+                {"role": "user", "content": prompt}]
+    return _complete(messages, max_tokens=300)
+
 # 聊到多少条以上、且攒够多少条没折叠的旧消息，才值得做一次总结
 SUMMARY_KEEP_RECENT = int(os.environ.get("SUMMARY_KEEP_RECENT", "30"))
 SUMMARY_BATCH = int(os.environ.get("SUMMARY_BATCH", "16"))
