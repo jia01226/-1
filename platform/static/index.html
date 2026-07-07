@@ -74,6 +74,8 @@
   .themebar{display:flex;gap:8px}
   .themebar button{flex:1;border:1px solid var(--line);background:var(--glass2);border-radius:14px;padding:9px 0;font-size:13px;font-family:inherit;color:var(--ink);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
   .themebar button.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold) inset;color:var(--gold-deep)}
+  .moodbtn{flex:1;min-width:56px;border:1px solid var(--line);background:var(--glass2);border-radius:14px;padding:8px 0;font-size:13px;font-family:inherit;color:var(--ink);line-height:1.7;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  .moodbtn.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold) inset}
   .calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .calhead b{font-size:15px;color:var(--gold-deep)}
   .calhead button{border:1px solid var(--line);background:var(--glass2);border-radius:10px;width:34px;height:30px;font-size:15px;color:var(--gold-deep)}
@@ -121,6 +123,11 @@
         <button data-t="sakura" onclick="setTheme('sakura')">🌸 樱粉</button>
         <button data-t="mist" onclick="setTheme('mist')">🌫 雾蓝</button>
       </div>
+      <div class="themebar" style="margin-top:8px">
+        <button data-f="std" onclick="setFont('std')">字号·标准</button>
+        <button data-f="big" onclick="setFont('big')">大</button>
+        <button data-f="huge" onclick="setFont('huge')">特大</button>
+      </div>
     </div>
     <div class="card">
       <h2>消息推送 🔔</h2>
@@ -147,6 +154,18 @@
       <div class="card"><h2>👥 群聊</h2>
         <div class="ct" style="color:var(--soft);font-size:12px">和整个团队一起聊 · @谁 谁答 ›</div></div>
     </a>
+    <div class="card"><h2>💗 今天的心情</h2>
+      <div style="display:flex;gap:8px;margin-top:8px;overflow-x:auto">
+        <button class="moodbtn" onclick="pickMood(this,'开心')">☀️<br>开心</button>
+        <button class="moodbtn" onclick="pickMood(this,'平静')">☁️<br>平静</button>
+        <button class="moodbtn" onclick="pickMood(this,'恋爱')">🌸<br>恋爱</button>
+        <button class="moodbtn" onclick="pickMood(this,'闪耀')">✨<br>闪耀</button>
+        <button class="moodbtn" onclick="pickMood(this,'低落')">🌧<br>低落</button>
+      </div>
+      <input id="moodNote" placeholder="写点什么记录这一刻…（可不填）" />
+      <button class="btn" onclick="saveMood()">保存 ♡</button>
+      <div id="moodList" class="ct" style="margin-top:8px;color:var(--soft);font-size:12px"></div>
+    </div>
     <div class="card"><h2>💗 待办与提醒</h2>
       <div class="ct" style="color:var(--soft);font-size:12px;margin-bottom:6px">还没了结的事记在这，到回访日会主动提醒你~ 弄好了点一下就收进"已了结"。</div>
       <div id="concernList" class="ct" style="margin-bottom:6px">加载中…</div>
@@ -214,6 +233,25 @@ function setTheme(t){
   const m=document.querySelector('meta[name="theme-color"]');if(m)m.content=mc[t]||mc.warm;
 }
 setTheme((()=>{try{return localStorage.getItem("theme")||"warm";}catch(_){return "warm";}})());
+// ---- 字号（标准/大/特大）----
+function setFont(f){
+  document.body.style.zoom={std:"",big:"1.08",huge:"1.18"}[f]||"";
+  try{localStorage.setItem("font",f);}catch(_){}
+  document.querySelectorAll("[data-f]").forEach(b=>b.classList.toggle("on",b.dataset.f===f));
+}
+setFont((()=>{try{return localStorage.getItem("font")||"std";}catch(_){return "std";}})());
+// ---- 心情记录 ----
+let moodSel="";
+function pickMood(btn,m){moodSel=m;document.querySelectorAll(".moodbtn").forEach(b=>b.classList.toggle("on",b===btn));}
+async function saveMood(){
+  if(!moodSel)return alert("先点一个心情呀~");
+  await api("/api/moods",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({mood:moodSel,note:$("#moodNote").value.trim()})});
+  $("#moodNote").value="";moodSel="";document.querySelectorAll(".moodbtn").forEach(b=>b.classList.remove("on"));
+  loadMoods();
+}
+async function loadMoods(){try{const r=await api("/api/moods");const arr=await r.json();
+  $("#moodList").innerHTML=arr.slice(0,5).map(m=>`${fmtTime(m.created_at)}【${esc(m.mood)}】${m.note?esc(m.note):""}`).join("<br>")||"还没记过~";
+}catch(e){}}
 async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
 async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";boot();}else alert("口令不对呀~");}
 
@@ -245,8 +283,8 @@ async function loadMsgs(){try{const r=await api("/api/messages");const arr=await
 async function send(){const t=$("#input").value.trim();const img=pending?pending.url:"";if(!t&&!img)return;$("#input").value="";if(msgs.querySelector(".empty"))msgs.innerHTML="";bubble("user",t,nowHM(),img);clearPending();const b=bubble("assistant","");b.classList.add("typing");let acc="";
   const r=await api("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t,image:img})});
   const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
-  while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf("\n\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith("data:"))continue;try{const e=JSON.parse(line.slice(5).trim());if(e.t){acc+=e.t;b.classList.remove("typing");b.textContent=acc;scroll();}}catch(_){}}}
-  b.classList.remove("typing");if(!acc)b.textContent="（没有回应，再试一次~）";else setBubbleTime(b,nowHM());}
+  while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf("\n\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith("data:"))continue;try{const e=JSON.parse(line.slice(5).trim());if(e.think){b.classList.remove("typing");if(!b._th){const d=document.createElement("details");d.style.cssText="margin-bottom:6px;font-size:12.5px;color:var(--soft)";d.innerHTML='<summary style="cursor:pointer">💭 想了想…</summary>';const p=document.createElement("div");p.style.cssText="white-space:pre-wrap;margin-top:4px";d.appendChild(p);b.prepend(d);b._th=p;}b._th.textContent+=e.think;scroll();}if(e.t){acc+=e.t;b.classList.remove("typing");b._tx.textContent=acc;scroll();}}catch(_){}}}
+  b.classList.remove("typing");if(!acc)b._tx.textContent="（没有回应，再试一次~）";else setBubbleTime(b,nowHM());}
 $("#input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 
 function visBadge(v){return v==="app"?'<span style="color:var(--soft)"> · 🔒只在这里</span>':v==="repo"?'<span style="color:var(--soft)"> · 📄仅仓库</span>':'';}
@@ -259,7 +297,7 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{const v=b.data
 
 // ---- 日常：纪念日 / 姨妈 / 排班 ----
 function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-function loadLife(){loadConcerns();loadAnniv();loadPeriods();loadShifts();loadActivity();if(!$("#periodDate").value)$("#periodDate").value=todayStr();}
+function loadLife(){loadMoods();loadConcerns();loadAnniv();loadPeriods();loadShifts();loadActivity();if(!$("#periodDate").value)$("#periodDate").value=todayStr();}
 async function loadConcerns(){try{const r=await api("/api/concerns");const arr=await r.json();
   const open=arr.filter(c=>c.status!=="resolved"),done=arr.filter(c=>c.status==="resolved");
   let h=open.map(c=>`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)"><span><span style="color:var(--gold-deep)">${"★".repeat(c.importance)}</span> ${esc(c.title)}${c.next_check?'<br><span style="color:var(--soft);font-size:12px">回访日 '+c.next_check+'</span>':''}</span><span style="white-space:nowrap"><span onclick="resolveConcern(${c.id},true)" style="color:#5a8f5a;padding:4px 6px" title="了结了">✓</span><span onclick="delConcern(${c.id})" style="color:var(--soft);padding:4px 6px">✕</span></span></div>`).join("");
