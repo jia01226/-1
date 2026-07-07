@@ -77,10 +77,13 @@ def api_chat():
     def gen():
         acc = ""
         for piece in chat_ai.stream_chat(history, posts):
-            if isinstance(piece, tuple) and piece[0] == "__usage__":
-                usage = piece[1] or {}
-                cost, it, ot = chat_ai.estimate_cost(chat_ai.MODEL, usage)
-                db.log_usage(chat_ai.MODEL, it, ot, cost)
+            if isinstance(piece, tuple):
+                if piece[0] == "__usage__":
+                    usage = piece[1] or {}
+                    cost, it, ot = chat_ai.estimate_cost(chat_ai.MODEL, usage)
+                    db.log_usage(chat_ai.MODEL, it, ot, cost)
+                elif piece[0] == "__think__":
+                    yield ("data: " + json.dumps({"think": piece[1]}, ensure_ascii=False) + "\n\n").encode("utf-8")
                 continue
             acc += piece
             yield ("data: " + json.dumps({"t": piece}, ensure_ascii=False) + "\n\n").encode("utf-8")
@@ -272,6 +275,20 @@ def api_shift_del():
     db.delete_shift((request.json or {}).get("date"))
     return jsonify({"ok": True})
 
+# ---- 心情记录 ----
+@app.get("/api/moods")
+@guard
+def api_moods(): return jsonify(db.recent_moods())
+
+@app.post("/api/moods")
+@guard
+def api_mood_add():
+    d = request.json or {}
+    mood = (d.get("mood") or "").strip()
+    if not mood:
+        return jsonify({"error": "need mood"}), 400
+    return jsonify({"id": db.add_mood(mood, (d.get("note") or "").strip())})
+
 # ---- 心事引擎 ----
 @app.get("/api/concerns")
 @guard
@@ -350,10 +367,13 @@ def api_group_chat():
         acc = ""
         model_used = (member.get("model") or "").strip() or chat_ai.MODEL
         for piece in group_chat.stream_reply(member, history, posts):
-            if isinstance(piece, tuple) and piece[0] == "__usage__":
-                usage = piece[1] or {}
-                cost, it, ot = chat_ai.estimate_cost(model_used, usage)
-                db.log_usage(model_used, it, ot, cost)
+            if isinstance(piece, tuple):
+                if piece[0] == "__usage__":
+                    usage = piece[1] or {}
+                    cost, it, ot = chat_ai.estimate_cost(model_used, usage)
+                    db.log_usage(model_used, it, ot, cost)
+                elif piece[0] == "__think__":
+                    yield ("data: " + json.dumps({"think": piece[1]}, ensure_ascii=False) + "\n\n").encode("utf-8")
                 continue
             acc += piece
             yield ("data: " + json.dumps({"t": piece}, ensure_ascii=False) + "\n\n").encode("utf-8")

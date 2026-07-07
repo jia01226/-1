@@ -36,7 +36,8 @@ CHARACTER = os.environ.get("CHARACTER", "").strip()
 
 BASE = (
     "你是一个 AI 助手。下面《人设》是使用者给你的设定，请按它来；"
-    "若《人设》为空，就做一个友好、真诚、有帮助的助手，正常对话即可。\n\n"
+    "若《人设》为空，就做一个友好、真诚、有帮助的助手，正常对话即可。\n"
+    "你的思考/推理过程也一律用中文（使用者能看到你的思考，她只看得懂中文）。\n\n"
     "下面是你的《人设》：\n"
 )
 
@@ -213,7 +214,11 @@ def _stream_http(url, headers, payload, usage):
                     usage.update(ev["usage"])   # 就地更新，带回给 stream_completion
                 chs = ev.get("choices") or []
                 ch = chs[0] if chs else {}      # 有些家收尾发空 choices（纯用量块），别被它绊倒
-                piece = (ch.get("delta") or {}).get("content") or ""
+                delta = ch.get("delta") or {}
+                think = delta.get("reasoning_content") or delta.get("reasoning") or ""
+                if think:
+                    yield ("__think__", think)  # 思维链（模型给才有）：单独通道，前端折叠显示
+                piece = delta.get("content") or ""
                 if piece:
                     yield piece
 

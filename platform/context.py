@@ -186,6 +186,22 @@ def _health_part(now):
     return lines
 
 
+def _mood_part(today):
+    """用户自己记的心情（最近两天）。给助手一个"她今天的天气"，语气跟着走。"""
+    import db
+    ms = db.recent_moods(limit=5)
+    if not ms:
+        return []
+    recent = [m for m in ms if str(m["created_at"])[:10] >= (today - datetime.timedelta(days=1)).isoformat()]
+    if not recent:
+        return []
+    lines = ["- 用户自己记的心情（体贴地参考、语气跟着走；别说「我看到你的心情记录」这种话）："]
+    for m in recent[:3]:
+        note = f"——{m['note']}" if m.get("note") else ""
+        lines.append(f"  · {str(m['created_at'])[5:16]}【{m['mood']}】{note}")
+    return lines
+
+
 def _concern_part(today):
     """用户记下的待办/提醒：到回访日自然地关心一下进展。"""
     import db
@@ -219,6 +235,7 @@ def build_now_context():
     lines += _shift_part(today)
     lines += _period_part(today)
     lines += _health_part(now)
+    lines += _mood_part(today)
     lines += _concern_part(today)
     lines += _activity_part(today)
     return "\n".join(lines)
