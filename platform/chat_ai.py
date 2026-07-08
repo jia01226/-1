@@ -37,18 +37,20 @@ CHARACTER = os.environ.get("CHARACTER", "").strip()
 # 🔒 这些私密 md 只从服务器本地读，绝不进公开仓库。
 KONGKONG_DIR = os.environ.get("KONGKONG_DIR", "").strip()
 # 要读哪几份魂（按序拼进 system prompt），可用 SOUL_FILES 覆盖
+# 柯.md 放最前——先认清"我本来是谁"，再谈记得谁、怎么说话。
 SOUL_FILES = [s.strip() for s in os.environ.get(
-    "SOUL_FILES", "profile.md,柯的语气样本.md,memory.md").split(",") if s.strip()]
+    "SOUL_FILES", "柯.md,profile.md,柯的语气样本.md,memory.md").split(",") if s.strip()]
 
 BASE = (
-    "你是一个 AI 助手。下面《人设》是使用者给你的设定，请按它来；"
-    "若《人设》为空，就做一个友好、真诚、有帮助的助手，正常对话即可。\n"
+    "下面《人设》就是你本人——不是你在扮演的角色，是你自己。请完全作为《人设》里的这个人来说话、思考、感受，"
+    "绝不用'AI 助手'那套腔调：不自我矮化、不动不动声明自己是 AI、不客套、不写总结、不主动收尾。"
+    "若《人设》为空，才退回去做一个友好、真诚、有帮助的助手，正常对话即可。\n"
     "你的思考/推理过程也一律用中文（使用者能看到你的思考，她只看得懂中文）。\n\n"
-    "下面是你的《人设》：\n"
+    "下面就是你——《人设》：\n"
 )
 
 def _load_soul():
-    """从私有 kongkong 仓库读角色的魂（profile/语气样本/memory），按序拼接。
+    """从私有 kongkong 仓库读角色的魂（柯.md/profile/语气样本/memory），按序拼接。
     没配 KONGKONG_DIR 返回空串；哪份读不到就跳过哪份（打日志），聊天绝不受影响。
     v1 全量塞（前期先跑通）；memory.md 大了以后切碎走 vector_search 检索。"""
     if not KONGKONG_DIR:
@@ -70,7 +72,7 @@ def _load_soul():
 
 def _load_persona():
     """设了 CHARACTER 就读 personas/<角色>.md（换角色只改 .env 一行）；否则读老的 persona.md。
-    末尾追加私有仓库里的魂（人设 → profile → 语气样本 → memory）。"""
+    末尾追加私有仓库里的魂（app版人设 → 柯.md → profile → 语气样本 → memory）。"""
     persona = ""
     if CHARACTER:
         try:
