@@ -1,7 +1,7 @@
 """向量记忆：让助手从一堆记忆里"精准想起"最相关的几条，记再多也不糊、又省又准。
 
 设计原则（为用户那台 4GB 小服务器量身）：
-- **首选轻量路线**：直接调中转(apikey.fun，OpenAI 兼容)的 /embeddings 接口算向量，
+- **首选轻量路线**：直接调 API_BASE(OpenAI 兼容,现为 OpenRouter)的 /embeddings 接口算向量，
   不下大模型、不占内存。可用 EMBED_* 环境变量配置。
 - **可选本地模型**：EMBED_BACKEND=local 时用 sentence-transformers + bge-small-zh（重，按需开）。
 - **永远不崩**：拿不到向量时自动降级成"关键词检索"，聊天功能绝不受影响。
