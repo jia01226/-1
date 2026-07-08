@@ -315,7 +315,7 @@ function renderMsg(m){const t=fmtTime(m.created_at);
   if(m.author==="user")return bubble("user",m.content,t,m.image);
   const parts=splitParts(m.content);
   if(parts.length<=1)return bubble(m.author,parts[0]||m.content,t,m.image);
-  parts.forEach((p,i)=>bubble("assistant",p,i===parts.length-1?t:"",i===0?m.image:""));}
+  parts.forEach((p,i)=>bubble("assistant",p,t,i===0?m.image:""));}  // 每条都带时间:标签同宽才对得齐
 async function loadMsgs(){try{const r=await api("/api/messages?session_id="+currentSid);const arr=await r.json();msgs.innerHTML="";if(!arr.length){msgs.innerHTML='<div class="empty">跟它说说话吧~</div>';}arr.forEach(renderMsg);scrollHard();}catch(e){}}
 function openDrawer(){$("#drawer").style.display="block";loadSessions();}
 function closeDrawer(){$("#drawer").style.display="none";}
@@ -355,7 +355,7 @@ async function send(){const t=$("#input").value.trim();const img=pending?pending
   b.classList.remove("typing");
   if(!acc){b._tx.textContent="（没有回应，再试一次~）";return;}
   while(bubbles.length>1&&!bubbles[bubbles.length-1]._tx.textContent){bubbles.pop().parentElement.remove();}
-  setBubbleTime(bubbles[bubbles.length-1],nowHM());}
+  bubbles.forEach(bb=>setBubbleTime(bb,nowHM()));}  // 每条都挂时间,泡泡才对得齐
 $("#input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 
 function visBadge(v){return v==="app"?'<span style="color:var(--soft)"> · 🔒只在这里</span>':v==="repo"?'<span style="color:var(--soft)"> · 📄仅仓库</span>':'';}
