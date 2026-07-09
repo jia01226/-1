@@ -67,6 +67,7 @@ def main():
         print(f"找不到文件：{path}")
         sys.exit(1)
 
+    db.init_db()   # 独立跑时确保表在（服务器上无害，幂等）
     cards, warns = parse(path)
     for w in warns:
         print("⚠️ ", w)
