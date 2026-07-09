@@ -121,11 +121,32 @@ function fmtTime(s){const m=String(s||"").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{
 function whoName(a){return a==="ke"?"柯":"我";}
 
 let pending=null;
-async function onPickFile(input){const f=input.files&&input.files[0];input.value="";if(!f)return;
-  try{const fd=new FormData();fd.append("file",f);const r=await api("/api/upload",{method:"POST",body:fd});const d=await r.json();
+// 手机照片又大又是 HEIC：上传前在浏览器里缩到 ≤1600px、转 JPG。
+// 体积从几 MB 降到几百 KB（过服务器体积限制），HEIC 重编码成 JPG（能正常显示）。失败则退回原图。
+function shrinkImage(file){
+  return new Promise((resolve)=>{
+    try{
+      const url=URL.createObjectURL(file);const im=new Image();
+      im.onload=()=>{
+        const MAX=1600;let{width:w,height:h}=im;
+        if(Math.max(w,h)>MAX){const s=MAX/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+        const cv=document.createElement("canvas");cv.width=w;cv.height=h;
+        cv.getContext("2d").drawImage(im,0,0,w,h);URL.revokeObjectURL(url);
+        cv.toBlob(b=>resolve(b?new File([b],"photo.jpg",{type:"image/jpeg"}):file),"image/jpeg",0.85);
+      };
+      im.onerror=()=>{URL.revokeObjectURL(url);resolve(file);};
+      im.src=url;
+    }catch(_){resolve(file);}
+  });
+}
+async function onPickFile(input){let f=input.files&&input.files[0];input.value="";if(!f)return;
+  const chip=document.querySelector(".chipbtn");const old=chip?chip.textContent:"";if(chip)chip.textContent="处理中…";
+  try{f=await shrinkImage(f);
+    const fd=new FormData();fd.append("file",f);const r=await api("/api/upload",{method:"POST",body:fd});const d=await r.json();
     if(d.error){alert("上传失败，再试一次~");return;}
     pending=d;$("#thumb").src=d.url;$("#thumbWrap").style.display="inline-block";
-  }catch(e){alert("上传失败~");}}
+  }catch(e){alert("上传失败~（图片太大或网络问题，换张小点的试试）");}
+  finally{if(chip)chip.textContent=old;}}
 function clearPending(){pending=null;$("#thumbWrap").style.display="none";$("#thumb").src="";}
 
 async function publish(){
