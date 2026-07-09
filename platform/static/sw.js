@@ -1,6 +1,30 @@
-// Service Worker（接收推送 + 点击打开 app）
+// Service Worker（接收推送 + 点击打开 app + 注入前端体验增强）
 self.addEventListener("install", e => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
+
+const UI_SCRIPT = '<script src="/static/ui-redesign.js?v=20260709" defer></script>';
+
+self.addEventListener("fetch", event => {
+  const req = event.request;
+  const url = new URL(req.url);
+  const wantsHtml = req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html");
+  if (req.method !== "GET" || url.origin !== self.location.origin || !wantsHtml) return;
+
+  event.respondWith((async () => {
+    const res = await fetch(req);
+    const type = res.headers.get("content-type") || "";
+    if (!type.includes("text/html")) return res;
+
+    let html = await res.text();
+    if (!html.includes("/static/ui-redesign.js")) {
+      html = html.replace("</body>", `${UI_SCRIPT}</body>`);
+    }
+    const headers = new Headers(res.headers);
+    headers.set("content-type", "text/html; charset=utf-8");
+    headers.set("cache-control", "no-store");
+    return new Response(html, { status: res.status, statusText: res.statusText, headers });
+  })());
+});
 
 self.addEventListener("push", event => {
   let d = { title: "AI 助手", body: "", url: "/" };
