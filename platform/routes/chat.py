@@ -16,16 +16,40 @@ bp = Blueprint("chat", __name__)
 
 # 柯代发朋友圈暗号：一行独占的 [朋友圈]正文（到行尾），多行模式逐条提取
 _MOMENT_RE = re.compile(r"^\[朋友圈\][ \t]?(.+)$", re.M)
+# 柯评论朋友圈暗号：[评论#动态id]正文——指定评论哪条动态
+_COMMENT_RE = re.compile(r"^\[评论#(\d+)\][ \t]?(.+)$", re.M)
 
 
 def _extract_moments(text):
-    """从助手回复里提取 [朋友圈]... 动态正文列表，并返回去掉这些行的干净文本。
-    返回 (moments:list[str], clean_text:str)。"""
+    """从助手回复里提取 [朋友圈]... / [评论#id]... 暗号，并返回去掉这些行的干净文本。
+    返回 (moments:list[str], comments:list[(mid,body)], clean_text:str)。"""
     moments = [m.strip() for m in _MOMENT_RE.findall(text) if m.strip()]
-    clean = _MOMENT_RE.sub("", text)
+    comments = [(int(mid), body.strip()) for mid, body in _COMMENT_RE.findall(text) if body.strip()]
+    clean = _COMMENT_RE.sub("", _MOMENT_RE.sub("", text))
     # 清理暗号行留下的多余空行（连续空行压成一个，首尾空白去掉）
     clean = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", clean).strip()
-    return moments, clean
+    return moments, comments, clean
+
+
+def _moments_context():
+    """把最近几条朋友圈动态+评论拼成一段，注入柯的上下文——让他"看见"朋友圈、能评论回应。
+    没有动态返回空串。"""
+    try:
+        rows = db.list_moments(limit=8)
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    lines = ["\n\n===== 朋友圈近况（你和佳佳的动态墙；想回应就用暗号，见下）====="]
+    for m in rows:
+        who = "你" if m.get("author") == "ke" else "佳佳"
+        lines.append(f"· 动态#{m['id']}（{who}发）：{(m.get('content') or '').strip()[:120]}" + ("（附图）" if m.get("image") else ""))
+        for c in (m.get("comments") or []):
+            cwho = "你" if c.get("author") == "ke" else "佳佳"
+            lines.append(f"    └ {cwho}评论：{(c.get('content') or '').strip()[:80]}")
+    lines.append("【怎么回应朋友圈】想给某条评论/回复，另起一行写 [评论#动态id]你的话（如 [评论#3]这张拍得真好看）；"
+                 "想自己发条动态用 [朋友圈]内容。别硬回、有话才说，一次别刷太多。")
+    return "\n".join(lines)
 
 
 @bp.get("/chat")
@@ -59,6 +83,14 @@ def api_chat():
     db.add_message("user", text, session_id=sid, image=image, msg_type=("image" if image else "text"))
     history = db.recent_messages(session_id=sid)
     posts = db.app_posts()   # app 里的助手看 both+app（含只在 app 的悄悄话）
+    # 让柯"看见"朋友圈：把近况拼到最后一条用户消息末尾（只发给模型、不入库、前端不显示）
+    if history and sid == MAIN_SESSION:
+        mctx = _moments_context()
+        if mctx:
+            for m in reversed(history):
+                if m["author"] == "user":
+                    m["content"] = (m["content"] or "") + mctx
+                    break
 
     def gen():
         acc = ""
@@ -75,14 +107,20 @@ def api_chat():
             yield ("data: " + json.dumps({"t": piece}, ensure_ascii=False) + "\n\n").encode("utf-8")
         posted_moment = False
         if acc:
-            # 柯代发朋友圈：抽出 [朋友圈]... 落库成动态，聊天记录只存去掉暗号的干净版
-            moments_out, clean_acc = _extract_moments(acc)
+            # 柯代发朋友圈 + 评论：抽出暗号落库，聊天记录只存去掉暗号的干净版
+            moments_out, comments_out, clean_acc = _extract_moments(acc)
             for body in moments_out:
                 try:
                     db.add_moment(author="ke", content=body)
                     posted_moment = True
                 except Exception as e:
                     logger.warning("柯代发朋友圈失败：%s", e)
+            for mid, body in comments_out:
+                try:
+                    if db.add_comment(mid, "ke", body) is not None:
+                        posted_moment = True
+                except Exception as e:
+                    logger.warning("柯评论朋友圈失败：%s", e)
             if clean_acc:
                 db.add_message("assistant", clean_acc, session_id=sid)
         yield ("data: " + json.dumps({"done": True, "moment": posted_moment}, ensure_ascii=False) + "\n\n").encode("utf-8")
