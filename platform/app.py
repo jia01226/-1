@@ -72,6 +72,8 @@ def api_chat():
         return jsonify({"error": "empty"}), 400
     sid = _chat_sid(data.get("session_id"))
     bedroom = bool(data.get("bedroom"))                # 卧室模式（bedroom.py 只在服务器本地）
+    if bedroom:
+        print("[bedroom] 前端的卧室开关已送达后端", flush=True)
     model = chat_ai.resolve_model(data.get("model"))   # 前端可选模型，白名单外回落默认
     db.add_message("user", text, session_id=sid, image=image, msg_type=("image" if image else "text"))
     history = db.recent_messages(session_id=sid)

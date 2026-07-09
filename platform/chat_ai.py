@@ -140,8 +140,9 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False):
             import bedroom as _bd
             parts[0] = _bd.load_bedroom_block()   # 卧室：沉浸开场白替换普通帽子（普通帽子会招致拒绝）
             use_split = False                      # 卧室不分句，长段沉浸
+            print(f"[bedroom] 开场白已加载({len(parts[0])}字)，卧室模式生效", flush=True)
         except Exception as e:
-            print("[bedroom] 加载失败，降级普通模式：", e)
+            print("[bedroom] 加载失败，降级普通模式：", e, flush=True)
 
     def _done():
         # 当下情境(时间/天气/心事/行踪)和分句规矩放提示词最末尾：
