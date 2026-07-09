@@ -238,6 +238,12 @@ def build_now_context():
     lines += _mood_part(today)
     lines += _concern_part(today)
     lines += _activity_part(today)
+    # 压轴再报一次钟：几万字提示词里末尾最显眼；上面心情/行踪各条都带自己的旧时间戳，
+    # 明说"那些不是现在"，防止把半夜记的心情当成当前时间（实测踩过：中午说成零点半）
+    lines.append(
+        f"-（时间以这行为准）此刻是 {now.strftime('%m月%d日')} {WEEK[today.weekday()]} "
+        f"{now.strftime('%H:%M')}，{seg}。上面各条记录里的时间戳是事情发生的时间，不是现在。"
+    )
     return "\n".join(lines)
 
 
