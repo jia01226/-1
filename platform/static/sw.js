@@ -10,19 +10,25 @@ self.addEventListener("fetch", event => {
   const wantsHtml = req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html");
   if (req.method !== "GET" || url.origin !== self.location.origin || !wantsHtml) return;
 
+  // 铁律「绝不崩」：注入是锦上添花，任何一步出岔子（离线/异常/非预期响应）
+  // 都退回原始请求，页面照常加载——增强失败可以，白屏不行。
   event.respondWith((async () => {
-    const res = await fetch(req);
-    const type = res.headers.get("content-type") || "";
-    if (!type.includes("text/html")) return res;
+    try {
+      const res = await fetch(req);
+      const type = res.headers.get("content-type") || "";
+      if (!res.ok || !type.includes("text/html")) return res;
 
-    let html = await res.text();
-    if (!html.includes("/static/ui-redesign.js")) {
-      html = html.replace("</body>", `${UI_SCRIPT}</body>`);
+      let html = await res.text();
+      if (!html.includes("/static/ui-redesign.js")) {
+        html = html.replace("</body>", `${UI_SCRIPT}</body>`);
+      }
+      const headers = new Headers(res.headers);
+      headers.set("content-type", "text/html; charset=utf-8");
+      headers.set("cache-control", "no-store");
+      return new Response(html, { status: res.status, statusText: res.statusText, headers });
+    } catch (_) {
+      return fetch(req);   // 注入路径挂了就走原路，绝不让页面打不开
     }
-    const headers = new Headers(res.headers);
-    headers.set("content-type", "text/html; charset=utf-8");
-    headers.set("cache-control", "no-store");
-    return new Response(html, { status: res.status, statusText: res.statusText, headers });
   })());
 });
 
