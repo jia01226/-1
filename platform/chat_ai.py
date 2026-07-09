@@ -231,7 +231,9 @@ def stream_chat(history, posts, model=None, bedroom=False):
     if bedroom:
         try:
             import bedroom as _bd
-            yield from stream_completion(messages, model=_bd.pick_model(MODEL), max_tokens=_bd.max_tokens())
+            # 卧室模型：.env 的 BEDROOM_MODEL 优先（换渠道后模型名不同，不用改 bedroom.py）
+            bd_model = os.environ.get("BEDROOM_MODEL", "").strip() or _bd.pick_model(MODEL)
+            yield from stream_completion(messages, model=bd_model, max_tokens=_bd.max_tokens())
             return
         except Exception as e:
             print("[bedroom] 模型路由失败，用默认：", e)
