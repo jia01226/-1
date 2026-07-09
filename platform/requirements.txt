@@ -1,4 +1,7 @@
-flask>=3.0
-requests>=2.31
-gunicorn>=21.0
-pywebpush>=1.14
+# 版本锁定说明：gunicorn 与服务器实测一致（journalctl 显示 26.0.0）；
+# 其余按重构时的稳定版锁定。若服务器上想核对真实版本：./venv/bin/pip freeze
+# ⚠️ 服务器上别随手重装依赖——现有 venv 能跑就是对的；真要重装先备份 venv。
+flask==3.1.3
+requests==2.33.1
+gunicorn==26.0.0
+pywebpush==2.3.0
