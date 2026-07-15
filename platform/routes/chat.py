@@ -82,7 +82,7 @@ def api_chat():
     model = chat_ai.resolve_model(data.get("model"))   # 前端可选模型，白名单外回落默认
     db.add_message("user", text, session_id=sid, image=image, msg_type=("image" if image else "text"))
     history = db.recent_messages(session_id=sid)
-    posts = db.app_posts()   # app 里的助手看 both+app（含只在 app 的悄悄话）
+    posts = db.retrieve_l2("single")   # 单聊记忆：active 的 L2 卡，已排除 no_model/已忘/已归档/repo-only
     # 让柯"看见"朋友圈：把近况拼到最后一条用户消息末尾（只发给模型、不入库、前端不显示）
     if history and sid == MAIN_SESSION:
         mctx = _moments_context()
