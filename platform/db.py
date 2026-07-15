@@ -554,6 +554,16 @@ def posts_without_embedding(model):
     conn.close()
     return [dict(r) for r in rows]
 
+def private_without_embedding(model):
+    """还没建过向量的私密卡（backfill 用；向量走 kind='private' 命名空间）。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT p.id, p.content FROM private_memories p "
+        "LEFT JOIN embeddings e ON e.kind='private' AND e.ref_id=p.id AND e.model=? "
+        "WHERE e.ref_id IS NULL AND p.status='active' AND p.scope!='no_model' ORDER BY p.id", (model,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def embedding_count(model):
     conn = get_db()
     n = conn.execute("SELECT COUNT(*) c FROM embeddings WHERE model=?", (model,)).fetchone()["c"]
