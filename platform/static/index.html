@@ -127,6 +127,14 @@
       <button class="btn" onclick="addPost()">记下来</button>
       <div class="ct" style="margin-top:8px;color:var(--soft);font-size:12px">🔒「只在这里」的记忆只待在你自己的服务器，不会上传到 GitHub 仓库。</div>
     </div>
+    <a href="/treasure" style="text-decoration:none;color:inherit;display:block">
+      <div class="card"><h2>⭐ 崽崽的小本本</h2>
+        <div class="ct" style="color:var(--soft);font-size:12px">长按聊天气泡收藏他说的话 · 都收在这 ›</div></div>
+    </a>
+    <a href="/inbox" style="text-decoration:none;color:inherit;display:block">
+      <div class="card"><h2>📥 他今天想记住的</h2>
+        <div class="ct" style="color:var(--soft);font-size:12px">他记下的新东西 · 你点头才算数 ›</div></div>
+    </a>
     <div id="postList"></div>
   </section>
   <section id="dashView" class="view">
@@ -306,13 +314,35 @@ function bubble(role,text,time,image,mid){const w=document.createElement("div");
   if(image){if(isImg(image)){const im=document.createElement("img");im.onload=scroll;im.src=image;im.style.cssText="max-width:200px;max-height:240px;border-radius:10px;display:block;cursor:pointer";im.onclick=()=>window.open(image);bb.appendChild(im);}else{const a=document.createElement("a");a.href=image;a.target="_blank";a.textContent="📎 "+(image.split("/").pop());a.style.color="var(--gold-deep)";bb.appendChild(a);}}
   const tx=document.createElement("span");if(text){tx.textContent=text;if(image)tx.style.cssText="display:block;margin-top:6px";}bb.appendChild(tx);
   if(role==="user"){w.appendChild(bb);w.appendChild(tag);}else{w.appendChild(tag);w.appendChild(bb);}
-  msgs.appendChild(w);scroll();bb._tag=tag;bb._who=who;bb._tx=tx;if(mid)bindLongPress(bb,mid);return bb;}
+  msgs.appendChild(w);scroll();bb._tag=tag;bb._who=who;bb._tx=tx;if(mid)bindLongPress(bb,mid,role);return bb;}
 function setBubbleTime(bb,t){if(bb&&bb._tag)bb._tag.textContent=bb._who+" · "+t;}
-// 长按(手机)/右键(电脑)删掉一条走样、说错的消息
-function bindLongPress(el,mid){let tm=null;const cancel=()=>{if(tm)clearTimeout(tm);tm=null;};
-  el.addEventListener("touchstart",()=>{tm=setTimeout(()=>{cancel();delMsg(mid);},600);},{passive:true});
+// 长按(手机)/右键(电脑)弹菜单：⭐收进小本本 / 🗑删掉这条
+function bindLongPress(el,mid,role){let tm=null;const cancel=()=>{if(tm)clearTimeout(tm);tm=null;};
+  el.addEventListener("touchstart",()=>{tm=setTimeout(()=>{cancel();showMsgMenu(el,mid,role);},600);},{passive:true});
   el.addEventListener("touchend",cancel);el.addEventListener("touchmove",cancel);
-  el.addEventListener("contextmenu",e=>{e.preventDefault();delMsg(mid);});}
+  el.addEventListener("contextmenu",e=>{e.preventDefault();showMsgMenu(el,mid,role);});}
+function showMsgMenu(el,mid,role){
+  const text=((el._tx&&el._tx.textContent)||"").trim();
+  const old=document.getElementById("msgMenu");if(old)old.remove();
+  const ov=document.createElement("div");ov.id="msgMenu";
+  ov.style.cssText="position:fixed;inset:0;z-index:15;background:rgba(60,50,40,.25);display:flex;align-items:flex-end;justify-content:center";
+  const box=document.createElement("div");
+  box.style.cssText="width:100%;max-width:420px;margin:0 10px calc(14px + env(safe-area-inset-bottom));background:var(--glass);backdrop-filter:blur(20px) saturate(1.5);-webkit-backdrop-filter:blur(20px) saturate(1.5);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow)";
+  const mkBtn=(label,fn,color)=>{const b=document.createElement("button");b.textContent=label;
+    b.style.cssText="display:block;width:100%;border:none;background:none;padding:14px;font-size:15px;font-family:inherit;border-bottom:1px solid var(--line);color:"+(color||"var(--ink)");
+    b.onclick=()=>{ov.remove();fn&&fn();};box.appendChild(b);};
+  if(text)mkBtn("⭐ 收进小本本",()=>starMsg(text,mid,role));
+  mkBtn("🗑 删掉这条",()=>delMsg(mid),"var(--soft)");
+  mkBtn("取消",null,"var(--soft)");
+  box.lastChild.style.borderBottom="none";
+  ov.appendChild(box);ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);}
+async function starMsg(text,mid,role){
+  try{await api("/api/treasures",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({content:text,msg_id:mid,author:role==="user"?"user":"assistant"})});
+    toast("已收进小本本 ⭐");}catch(e){if(e!==0)toast("没收上，再试一下~");}}
+function toast(t){const d=document.createElement("div");d.textContent=t;
+  d.style.cssText="position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:14px;padding:9px 16px;font-size:14px;color:var(--gold-deep);z-index:16;box-shadow:var(--shadow)";
+  document.body.appendChild(d);setTimeout(()=>d.remove(),1800);}
 async function delMsg(mid){if(!confirm("删掉这条消息？（走样、说错的话，删了它就不在对话里了）"))return;try{await api("/api/messages/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:mid})});loadMsgs();}catch(e){}}
 let pending=null;
 async function onPickFile(input){const f=input.files&&input.files[0];input.value="";if(!f)return;

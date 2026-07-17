@@ -16,6 +16,39 @@ def inbox_page():
     return send_from_directory(STATIC_DIR, "inbox.html")
 
 
+# ==================== 崽崽的小本本（长按聊天气泡收藏柯说的话）====================
+@bp.get("/treasure")
+def treasure_page():
+    """小本本页面（能用版，精修交知言）。"""
+    return send_from_directory(STATIC_DIR, "treasure.html")
+
+
+@bp.get("/api/treasures")
+@guard
+def api_treasures(): return jsonify(db.list_treasures())
+
+
+@bp.post("/api/treasures")
+@guard
+def api_add_treasure():
+    d = jbody()
+    content = (d.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "empty"}), 400
+    tid = db.add_treasure(content, author=d.get("author", "assistant"), msg_id=d.get("msg_id"))
+    return jsonify({"id": tid})
+
+
+@bp.post("/api/treasures/delete")
+@guard
+def api_del_treasure():
+    tid = jget("id")
+    if not tid:
+        return jsonify({"error": "need id"}), 400
+    db.delete_treasure(tid)
+    return jsonify({"ok": True})
+
+
 @bp.get("/api/posts")
 @guard
 def api_posts(): return jsonify(db.all_posts())
@@ -100,8 +133,59 @@ def api_mem_review():
 @bp.get("/api/memory/cards")
 @guard
 def api_mem_cards():
-    """卡片库：默认单聊视角（含 private，排除 no_model）。"""
-    return jsonify(db.retrieve_l2("single"))
+    """卡片库列表。可选参数：store=l2|private（默认 l2）、status=active|archived|forgotten_buffer|superseded|pending|all（默认 active）、q=搜索词。
+    不带参数＝原行为（L2 生效卡）。私密库结果含 no_model（仅 UI 后台可见，任何场景不进上下文）。"""
+    from flask import request
+    store = request.args.get("store", "l2")
+    status = request.args.get("status", "active")
+    q = (request.args.get("q") or "").strip()
+    return jsonify(db.list_cards(store=store, status=status, q=q))
+
+
+@bp.get("/api/memory/card")
+@guard
+def api_mem_card_detail():
+    """卡片详情（柯 §七："为什么记住/何时被用过"）：?id=&store=l2|private。"""
+    from flask import request
+    cid = request.args.get("id")
+    if not cid:
+        return jsonify({"error": "need id"}), 400
+    card = db.card_detail(int(cid), store=request.args.get("store", "l2"))
+    if not card:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(card)
+
+
+@bp.post("/api/memory/card/edit")
+@guard
+def api_mem_card_edit():
+    """记错了→改内容：走追加+替代（supersede），旧卡留档转 superseded，不整条覆盖（柯的字段级约束）。"""
+    d = jbody()
+    if not d.get("id") or not (d.get("content") or "").strip():
+        return jsonify({"error": "need id+content"}), 400
+    nid = db.supersede_card(int(d["id"]), d["content"].strip(), store=d.get("store", "l2"))
+    # 新卡顺手建向量（失败不影响保存）
+    try:
+        import vector_search
+        store = d.get("store", "l2")
+        if store == "private":
+            vector_search.index_private(nid, d["content"].strip())
+        else:
+            vector_search.index_post(nid, d["content"].strip())
+    except Exception as e:
+        logger.warning("索引改后的卡失败：%s", e)
+    return jsonify({"ok": True, "new_id": nid})
+
+
+@bp.post("/api/memory/card/archive")
+@guard
+def api_mem_card_archive():
+    """归档＝保留但默认不检索（不删、不进冷静期）。"""
+    d = jbody()
+    if not d.get("id"):
+        return jsonify({"error": "need id"}), 400
+    db.archive_card(int(d["id"]), store=d.get("store", "l2"))
+    return jsonify({"ok": True})
 
 
 @bp.post("/api/memory/card/scope")

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#FBF8F1" />
+<link rel="apple-touch-icon" href="/static/icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>崽崽的小本本</title>
+<!--
+  崽崽的小本本（能用版）——聊天里长按气泡收藏的句子都收在这。
+  小克起骨架（真连后端 /api/treasures），玻璃皮沿用主题变量，精修/动效交知言。
+  别删接口契约，套皮就行。契约见 platform/记忆接口契约-给知言.md。
+-->
+<style>
+  :root{
+    --bg1:#FBF8F1;--bg2:#F6EFE2;--blob1:rgba(201,168,106,.32);--blob2:rgba(232,196,160,.35);
+    --ink:#4A4138;--soft:#9C8F7E;--gold:#C9A86A;--gold-deep:#B8924E;
+    --line:rgba(255,255,255,.65);--glass:rgba(255,255,255,.55);--glass2:rgba(255,255,255,.38);
+    --shadow:0 8px 32px rgba(150,120,70,.14)
+  }
+  html[data-theme="sakura"]{
+    --bg1:#FBF3F5;--bg2:#F7E8ee;--blob1:rgba(224,148,171,.30);--blob2:rgba(244,196,210,.40);
+    --ink:#54424b;--soft:#a8919b;--gold:#D48CA1;--gold-deep:#C2708A;--shadow:0 8px 32px rgba(196,120,146,.15)
+  }
+  html[data-theme="mist"]{
+    --bg1:#F2F4F9;--bg2:#E9EDF6;--blob1:rgba(140,160,205,.28);--blob2:rgba(180,196,230,.38);
+    --ink:#454b5c;--soft:#8d94a8;--gold:#8FA3CC;--gold-deep:#7189BC;--shadow:0 8px 32px rgba(110,132,180,.15)
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif;color:var(--ink);
+    background:linear-gradient(165deg,var(--bg1),var(--bg2));min-height:100dvh;transition:background .4s}
+  body::before,body::after{content:"";position:fixed;border-radius:50%;filter:blur(70px);z-index:-1;pointer-events:none}
+  body::before{width:46vh;height:46vh;top:-12vh;right:-14vh;background:var(--blob1)}
+  body::after{width:52vh;height:52vh;bottom:-16vh;left:-16vh;background:var(--blob2)}
+  header{padding:12px;text-align:center;position:sticky;top:0;z-index:5;
+    background:var(--glass);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:18px;letter-spacing:1px;color:var(--gold-deep)}
+  header .back{position:absolute;left:12px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:22px;color:var(--gold-deep)}
+  main{max-width:640px;margin:0 auto;padding:14px 14px calc(30px + env(safe-area-inset-bottom))}
+  .hint{font-size:12.5px;color:var(--soft);line-height:1.7;margin:2px 4px 14px}
+  .card{background:var(--glass);backdrop-filter:blur(16px) saturate(1.5);-webkit-backdrop-filter:blur(16px) saturate(1.5);
+    border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
+  .body{font-size:15px;line-height:1.75;white-space:pre-wrap;word-break:break-word}
+  .meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--soft)}
+  .meta .del{border:none;background:none;color:var(--soft);font-size:14px;padding:2px 6px;opacity:.6}
+  .empty{text-align:center;color:var(--soft);font-size:14px;padding:40px 10px;line-height:1.8}
+  #gate{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);align-items:center;justify-content:center;z-index:20}
+  #gate .box{background:#fff;border-radius:16px;padding:22px;text-align:center}
+  #gate button{border:1px solid var(--line);background:var(--glass2);border-radius:13px;padding:9px 16px;font-size:14px;font-family:inherit;color:var(--gold-deep)}
+</style>
+</head>
+<body>
+<header>
+  <button class="back" onclick="location.href='/'">‹</button>
+  <h1>⭐ 崽崽的小本本</h1>
+</header>
+<main>
+  <div class="hint">他突然说的暖话，长按聊天气泡就能收进来——收在这里的句子，删了聊天记录也还在。</div>
+  <div id="list"></div>
+</main>
+
+<div id="gate"><div class="box">请先在主页登录后再来看这里。<br><br><button onclick="location.href='/'">回主页</button></div></div>
+
+<script>
+  const $=s=>document.querySelector(s);
+  try{const t=localStorage.getItem("theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}
+  async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
+  function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+  function fmt(s){const m=String(s||"").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);return m?`${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`:"";}
+
+  async function load(){
+    let rows=[];
+    try{ rows=await (await api("/api/treasures")).json(); }
+    catch(e){ if(e===0)return; $("#list").innerHTML='<div class="empty">加载失败，再试一下~</div>'; return; }
+    if(!rows.length){ $("#list").innerHTML='<div class="empty">小本本还空着~<br>去聊天里长按他说的话，点「收进小本本」。</div>'; return; }
+    $("#list").innerHTML=rows.map(r=>`<div class="card" data-id="${r.id}">
+      <div class="body">${esc(r.content)}</div>
+      <div class="meta"><span>${r.author==="user"?"我说的":"他说的"} · ${fmt(r.created_at)}</span>
+        <button class="del" data-a="del" title="从小本本拿出去">✕</button></div>
+    </div>`).join("");
+  }
+
+  $("#list").addEventListener("click", async e=>{
+    const btn=e.target.closest("button[data-a=del]"); if(!btn)return;
+    if(!confirm("从小本本里拿出去？（不影响聊天记录）"))return;
+    const card=btn.closest(".card");
+    try{
+      await api("/api/treasures/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:Number(card.dataset.id)})});
+      card.remove();
+      if(!$("#list").children.length)load();
+    }catch(err){ if(err!==0)alert("没删掉，再试一下"); }
+  });
+
+  load();
+</script>
+</body>
+</html>

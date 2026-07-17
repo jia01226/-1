@@ -213,6 +213,16 @@ CREATE TABLE IF NOT EXISTS private_memories (
     updated_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
+-- 崽崽的小本本：聊天里长按收藏的句子（柯突然说的暖话，她想一直记着的）
+CREATE TABLE IF NOT EXISTS treasures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    author TEXT DEFAULT 'assistant',   -- 'assistant'=柯说的 / 'user'=她自己说的
+    msg_id INTEGER,                    -- 来源聊天消息 id（可空；消息删了句子还在）
+    note TEXT DEFAULT '',
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
 -- 记忆注入日志（每轮落库，验收与归因用：柯忽然像助手/提了不该提的/忘了纪念日/变慢时能定位）
 CREATE TABLE IF NOT EXISTS mem_injection_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -509,6 +519,45 @@ def graduate_forgotten(days=7):
     conn.commit(); conn.close()
     return n + cur2.rowcount
 
+def archive_card(cid, store="l2"):
+    """归档＝保留但默认不检索（跟"忘掉"不同：不删、不进冷静期，只是不再出场）。"""
+    conn = get_db()
+    conn.execute(f"UPDATE {_tbl(store)} SET status='archived', updated_at=datetime('now','+8 hours') WHERE id=?", (cid,))
+    conn.commit(); conn.close()
+
+def list_cards(store="l2", status="active", q=""):
+    """卡片库列表（给知言的收件箱/卡片库 UI）：按库、状态、搜索词过滤。
+    status='all' 不筛状态；q 是内容/主题的模糊搜索。私密库这里含 no_model（后台可见，仅 UI 用，不进上下文）。"""
+    where, args = [], []
+    if status and status != "all":
+        where.append("status=?"); args.append(status)
+    if q:
+        where.append("(content LIKE ? OR topic LIKE ?)"); args += [f"%{q}%", f"%{q}%"]
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+    if store == "private":
+        return _rows(f"SELECT *, 'private' AS store FROM private_memories{cond} ORDER BY id DESC", args)
+    # L2 沿用 app 侧口径：不吃 repo-only
+    cond2 = cond + (" AND " if cond else " WHERE ") + "visibility IN ('both','app')"
+    return _rows(f"SELECT *, 'l2' AS store FROM posts{cond2} ORDER BY id DESC", args)
+
+def card_detail(cid, store="l2"):
+    """卡片详情：全部字段 + "何时被用过"（扫最近注入日志，柯 §七 要的来源与激活记录）。"""
+    conn = get_db()
+    row = conn.execute(f"SELECT * FROM {_tbl(store)} WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    card = dict(row); card["store"] = store
+    token = ("p" + str(cid)) if store == "private" else str(cid)
+    used = []
+    for lg in recent_injection_logs(500):
+        ids = [x.strip("[] '\"") for x in (lg.get("mem_ids") or "").split(",")]
+        if token in ids:
+            used.append({"at": lg.get("created_at"), "scope": lg.get("scope"), "query": lg.get("query")})
+    card["used_count"] = len(used)
+    card["used"] = used[:20]
+    return card
+
 def set_card_scope(cid, scope, store="l2"):
     """改可见范围（纠错闭环：把误标 shared 的私密内容改回 private/no_model）。"""
     allowed = ("private", "shared", "group-safe", "no_model") if store == "l2" else ("private", "no_model")
@@ -540,6 +589,30 @@ def prune_injection_logs(keep_days=30):
                        (f'-{int(keep_days)} days',))
     conn.commit(); n = cur.rowcount; conn.close()
     return n
+
+# ---- 崽崽的小本本（长按聊天气泡收藏的句子）----
+def add_treasure(content, author="assistant", msg_id=None):
+    """收藏一句话。同样内容已收藏过就不重复收（返回已有 id）。"""
+    content = (content or "").strip()
+    if not content:
+        return None
+    conn = get_db()
+    hit = conn.execute("SELECT id FROM treasures WHERE content=?", (content,)).fetchone()
+    if hit:
+        conn.close()
+        return hit["id"]
+    cur = conn.execute("INSERT INTO treasures (content,author,msg_id) VALUES (?,?,?)",
+                       (content, author, msg_id))
+    conn.commit(); tid = cur.lastrowid; conn.close()
+    return tid
+
+def list_treasures():
+    return _rows("SELECT * FROM treasures ORDER BY id DESC")
+
+def delete_treasure(tid):
+    conn = get_db()
+    conn.execute("DELETE FROM treasures WHERE id=?", (tid,))
+    conn.commit(); conn.close()
 
 def log_usage(model, it, ot, cost):
     conn = get_db()
