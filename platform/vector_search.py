@@ -128,25 +128,38 @@ def _lexical_score(q_tokens, text):
 # ============ 入库 / 回填 ============
 def index_post(post_id, content):
     """给一条 post 算向量并入库（已存在则更新）。失败安静跳过，绝不影响主流程。"""
+    return _index_one("post", post_id, content)
+
+
+def index_private(pid, content):
+    """给一条私密卡算向量并入库，走 kind='private' 命名空间（只有单聊检索路径会查它）。"""
+    return _index_one("private", pid, content)
+
+
+def _index_one(kind, ref_id, content):
     if not available():
         return False
     try:
         vec = _normalize(embed([content])[0])
-        _db.upsert_embedding("post", post_id, EMBED_MODEL, len(vec), _pack(vec), content)
+        _db.upsert_embedding(kind, ref_id, EMBED_MODEL, len(vec), _pack(vec), content)
         return True
     except Exception as e:
-        print("[vector] index_post 失败：", e)
+        print(f"[vector] index({kind}) 失败：", e)
         return False
 
 
-def backfill(batch=32, kinds=("post",)):
-    """给还没有向量的记忆批量补算。返回新建条数。"""
+def backfill(batch=32, kinds=("post", "private")):
+    """给还没有向量的记忆批量补算（posts + 私密卡）。返回新建条数。"""
     if not available():
         print("[vector] 语义后端不可用，无法回填（聊天仍正常，走关键词检索）")
         return 0
+    sources = {"post": _db.posts_without_embedding, "private": _db.private_without_embedding}
     total = 0
-    if "post" in kinds:
-        rows = _db.posts_without_embedding(EMBED_MODEL)
+    for kind in kinds:
+        getter = sources.get(kind)
+        if not getter:
+            continue
+        rows = getter(EMBED_MODEL)
         for i in range(0, len(rows), batch):
             chunk = rows[i:i + batch]
             try:
@@ -156,7 +169,7 @@ def backfill(batch=32, kinds=("post",)):
                 continue
             for r, v in zip(chunk, vecs):
                 nv = _normalize(v)
-                _db.upsert_embedding("post", r["id"], EMBED_MODEL, len(nv), _pack(nv), r["content"])
+                _db.upsert_embedding(kind, r["id"], EMBED_MODEL, len(nv), _pack(nv), r["content"])
                 total += 1
             time.sleep(0.2)  # 对中转温柔点
     print(f"[vector] 回填完成，新增 {total} 条向量")
@@ -185,15 +198,25 @@ def _weight(meta, ref_id):
         pass
     return 1.0 + RECENCY_W * rec + boost
 
+def _degraded_rows(kind):
+    """语义后端不可用时的词面检索数据源——按命名空间取，且在查询层就守住 scope：
+    kind='private'→只私密卡（no_model 已排除）；kind='post'→单聊允许集（active、非 no_model、非 repo-only）。
+    绝不再对 all_posts() 全量兜底，免得把 no_model/已忘/已归档的翻出来。"""
+    if kind == "private":
+        return [{"id": r["id"], "content": r["content"]} for r in _db.retrieve_private()]
+    return [{"id": r["id"], "content": r["content"]} for r in _db.retrieve_l2("single")]
+
 def search(query, k=8, kind="post"):
     """返回最相关的 k 条：[{ref_id, text, score}]。语义可用走混合，否则纯词面；
-    再按"时间新鲜度+类型重要度"加权，让越近越重要的记忆更容易被想起。"""
+    再按"时间新鲜度+类型重要度"加权，让越近越重要的记忆更容易被想起。
+    注意：本函数只负责"打分排序"，最终"能不能出场"由调用方按当前允许集(by_id)再筛一道
+    ——因为向量是历史快照，卡片改了 scope/status 后旧向量还在，得靠调用方兜底。"""
     query = (query or "").strip()
     if not query:
         return []
     q_tokens = _tokens(query)
     rows = _db.embeddings_by_kind(kind, EMBED_MODEL)
-    meta = _post_meta()
+    meta = _post_meta() if kind == "post" else {}   # 私密卡不吃 posts 的加权表，避免 ref_id 撞号串权重
 
     use_sem = available() and rows
     q_vec = None
@@ -213,8 +236,8 @@ def search(query, k=8, kind="post"):
             scored.append({"ref_id": r["ref_id"], "text": r["text"],
                            "score": base * _weight(meta, r["ref_id"])})
     else:
-        # 降级：对全部 posts 做词面检索（即使没建过向量也能用）
-        for p in _db.all_posts():
+        # 降级：对本命名空间的当前允许集做词面检索（scope 在数据源就守住了）
+        for p in _degraded_rows(kind):
             lex = _lexical_score(q_tokens, p["content"])
             if lex > 0:
                 scored.append({"ref_id": p["id"], "text": p["content"],

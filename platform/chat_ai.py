@@ -130,12 +130,52 @@ def _load_persona():
 # 记忆条数超过这个数才启用"向量精准想起"；以下则全量塞（小语料全带最稳）
 FULL_MEMORY_LIMIT = int(os.environ.get("FULL_MEMORY_LIMIT", "60"))
 TOPK = int(os.environ.get("VEC_TOPK", "12"))
-# 这些类型永远带上（承诺/愿望太重要，不能漏）
-ALWAYS_TYPES = {"PROMISE", "WISHLIST"}
+PRIVATE_TOPK = int(os.environ.get("VEC_PRIVATE_TOPK", "5"))
+# 事实专道·常驻卡（柯施工单§二 ALWAYS_TYPES）：这些不靠向量猜，命中即取、每轮必带。
+# 新卡类型（人格/关系/表达规则/安全/硬约束）+ 过渡期保留旧库的承诺/愿望，等佳佳切完卡再瘦身。
+ALWAYS_TYPES = {"PROMISE", "WISHLIST",
+                "identity_core", "relationship_core", "communication_rule",
+                "safety_rule", "active_constraint"}
+
+def _approx_tokens(s):
+    """粗估 token（中文≈字数/1.5，够注入日志归因用，不追求精确）。"""
+    return int(len(s or "") / 1.5)
 
 def _render(parts, items):
     for p in items:
         parts.append(f"[{p['type']}] {p['content']}")
+
+def _private_block(query):
+    """私密记忆注入（L1.5B）——只在单聊路径拼装（build_system_prompt 本就只服务单聊/卧室，
+    群聊有自己的 build_messages、根本不调这里，物理够不着私密库）。按需检索，no_model 永不出场。"""
+    try:
+        import db
+        cards = db.retrieve_private()          # 已排除 no_model / 非 active
+    except Exception:
+        return "", []
+    if not cards:
+        return "", []
+    by_id = {c["id"]: c for c in cards}
+    chosen = []
+    # 语料小就全带；大了走 kind='private' 向量精准想起（旧向量若指向已改卡，by_id 兜底筛掉）
+    if len(cards) <= FULL_MEMORY_LIMIT or not query:
+        chosen = cards[:FULL_MEMORY_LIMIT]
+    else:
+        try:
+            import vector_search
+            for h in vector_search.search(query, k=PRIVATE_TOPK, kind="private"):
+                c = by_id.get(h["ref_id"])
+                if c and c not in chosen:
+                    chosen.append(c)
+        except Exception as e:
+            print("[chat_ai] 私密检索失败，回退最近：", e)
+            chosen = cards[:PRIVATE_TOPK]
+    if not chosen:
+        return "", []
+    lines = ["\n\n===== 私密记忆（只在你和佳佳的单聊里；说话该记得这些，但别硬提）====="]
+    for c in chosen:
+        lines.append(f"[{c.get('topic') or '私密'}] {c['content']}")
+    return "\n".join(lines), [c["id"] for c in chosen]
 
 def _now_context():
     try:
@@ -166,7 +206,30 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False):
         except Exception as e:
             print("[bedroom] 加载失败，降级普通模式：", e, flush=True)
 
+    # 注入日志的账本（每轮落库，验收/归因用；全程 try 兜底，绝不因记账崩了聊天）
+    stat = {"l2_ids": [], "priv_ids": [], "hit_rule": 0, "hit_vector": 0, "card_tokens": 0}
+
+    def _log_injection():
+        try:
+            import db
+            db.log_injection(
+                scope="bedroom" if bedroom_on else "single",
+                l1_tokens=_approx_tokens(parts[0]) + _approx_tokens(parts[1] if len(parts) > 1 else ""),
+                work_tokens=_approx_tokens(summary or ""),
+                card_count=len(stat["l2_ids"]) + len(stat["priv_ids"]),
+                card_tokens=stat["card_tokens"],
+                hit_rule=stat["hit_rule"], hit_vector=stat["hit_vector"],
+                mem_ids=stat["l2_ids"] + ["p" + str(i) for i in stat["priv_ids"]],
+                query=query or "")
+        except Exception as e:
+            print("[chat_ai] 注入日志失败（不影响聊天）：", e)
+
     def _done():
+        # 私密记忆（L1.5B）——只在单聊/卧室拼；群聊物理够不着（它不调本函数）
+        pblock, pids = _private_block(query)
+        if pblock:
+            parts.append(pblock); stat["priv_ids"] = pids
+            stat["card_tokens"] += _approx_tokens(pblock)
         # 当下情境(时间/天气/心事/行踪)和分句规矩放提示词最末尾：
         # 魂+记忆动辄几万字，埋中间会被漏读；且每轮都变的东西放末尾，为将来的 prompt 缓存让路
         parts.append(_now_context())
@@ -174,6 +237,7 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False):
             parts.append(SPLIT_RULE)
         elif bedroom_on:
             parts.append(bedroom_tail)
+        _log_injection()
         return "\n".join(parts)
 
     if summary:
@@ -184,6 +248,8 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False):
     if len(posts) <= FULL_MEMORY_LIMIT or not query:
         parts.append("\n\n===== 记忆库（最新在前）=====")
         _render(parts, posts[:200])
+        stat["l2_ids"] = [p["id"] for p in posts[:200]]
+        stat["card_tokens"] += sum(_approx_tokens(f"{p['type']}{p['content']}") for p in posts[:200])
         return _done()
 
     # —— 记忆多了：向量+词面 精准想起 ——
@@ -198,24 +264,26 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False):
     chosen, seen = [], set()
     if hits:
         for h in hits:
-            p = by_id.get(h["ref_id"])
+            p = by_id.get(h["ref_id"])   # 旧向量指向已改 scope/status 的卡时，by_id 里没有→自动筛掉
             if p and p["id"] not in seen:
-                chosen.append(p); seen.add(p["id"])
+                chosen.append(p); seen.add(p["id"]); stat["hit_vector"] += 1
     else:
         # 检索完全不可用：退回最近一批
         for p in posts[:TOPK]:
             chosen.append(p); seen.add(p["id"])
 
-    # 永远要带的（承诺/愿望）+ 最近 8 条
+    # 事实专道·常驻卡（命中即取，不靠向量猜）+ 最近 8 条
     for p in posts:
         if p["type"] in ALWAYS_TYPES and p["id"] not in seen:
-            chosen.append(p); seen.add(p["id"])
+            chosen.append(p); seen.add(p["id"]); stat["hit_rule"] += 1
     for p in posts[:8]:
         if p["id"] not in seen:
             chosen.append(p); seen.add(p["id"])
 
     parts.append("\n\n===== 记忆库（已为这次对话挑出最相关的）=====")
     _render(parts, chosen)
+    stat["l2_ids"] = [p["id"] for p in chosen]
+    stat["card_tokens"] += sum(_approx_tokens(f"{p['type']}{p['content']}") for p in chosen)
     return _done()
 
 def _now_stamp():
@@ -542,7 +610,7 @@ def write_dream(date=None):
     # 掺几条旧记忆当梦的底料（梦就是新旧记忆搅在一起）
     old = ""
     try:
-        posts = db.app_posts()
+        posts = db.retrieve_l2("single")   # 做梦也别翻出 no_model/已忘的记忆
         picks = [p["content"] for p in posts[3:60:11]][:4]   # 隔着取几条旧的，别总是最新几条
         if picks:
             old = "\n【旧记忆（梦的底料，可化用）】\n" + "\n".join("- " + c for c in picks)
