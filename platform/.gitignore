@@ -1,5 +1,10 @@
 .env
 memories.db
+
+# 柯的服务器本地私有模块（卧室/每日功课）：只住服务器，永不入库
+# protocol.* 一条同时挡 routes/protocol.py 和 static/protocol.html（gitignore 不带斜杠=任意目录都匹配）
+bedroom.py
+protocol.*
 persona.md
 vapid_private.pem
 proactive.log

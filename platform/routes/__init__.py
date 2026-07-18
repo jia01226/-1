@@ -8,8 +8,16 @@ from . import (pages, chat, memory, media, daily, push, track,
 
 ALL_BLUEPRINTS = (
     pages.bp, chat.bp, memory.bp, media.bp, daily.bp, push.bp,
-    track.bp, diary.bp, reading.bp, capsule.bp, moments.bp,   # group.bp 已下线（退役，待部署）
+    track.bp, diary.bp, reading.bp, capsule.bp, moments.bp,   # group.bp 已下线（退役）
 )
+
+# 柯的服务器本地私有模块（如 protocol＝每日功课）：文件只住服务器、永不入库（见 .gitignore）。
+# 仓库只留这个挂载点——文件在就自动挂，不在就跳过，绝不崩。0718 收编：从前柯手改本文件挂载，pull 会打架，改成这样就不会了。
+try:
+    from . import protocol
+    ALL_BLUEPRINTS += (protocol.bp,)
+except ImportError:
+    pass
 
 
 def register_all(app):
