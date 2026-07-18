@@ -10,21 +10,9 @@
 <style>
   /* ===== 主题（暖麻/樱粉/雾蓝），玻璃质感全靠这些变量——与主页同一套皮肤 ===== */
   :root{
-    --bg1:#FBF8F1;--bg2:#F6EFE2;--blob1:rgba(201,168,106,.32);--blob2:rgba(232,196,160,.35);
-    --ink:#4A4138;--soft:#9C8F7E;--gold:#C9A86A;--gold-deep:#B8924E;
-    --line:rgba(255,255,255,.65);--me:rgba(243,231,207,.78);
-    --glass:rgba(255,255,255,.55);--glass2:rgba(255,255,255,.38);
-    --shadow:0 8px 32px rgba(150,120,70,.14)
-  }
-  html[data-theme="sakura"]{
-    --bg1:#FBF3F5;--bg2:#F7E8ee;--blob1:rgba(224,148,171,.30);--blob2:rgba(244,196,210,.40);
-    --ink:#54424b;--soft:#a8919b;--gold:#D48CA1;--gold-deep:#C2708A;
-    --me:rgba(248,224,232,.82);--shadow:0 8px 32px rgba(196,120,146,.15)
-  }
-  html[data-theme="mist"]{
-    --bg1:#F2F4F9;--bg2:#E9EDF6;--blob1:rgba(140,160,205,.28);--blob2:rgba(180,196,230,.38);
-    --ink:#454b5c;--soft:#8d94a8;--gold:#8FA3CC;--gold-deep:#7189BC;
-    --me:rgba(223,231,246,.85);--shadow:0 8px 32px rgba(110,132,180,.15)
+    --bg1:#FAF7F1;--bg2:#F4EEE5;--blob1:rgba(198,163,101,.16);--blob2:rgba(116,62,73,.08);
+    --ink:#403A35;--soft:#8E8378;--gold:#C6A365;--gold-deep:#743E49;
+    --line:#E7DFD4;--me:#EFE3D6;--glass:#FFFDF9;--glass2:#F8F3EC;--shadow:none
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%}
@@ -35,28 +23,28 @@
   body::after{width:52vh;height:52vh;bottom:-16vh;left:-16vh;background:var(--blob2)}
   /* ===== 玻璃 header ===== */
   header{padding:12px;text-align:center;position:sticky;top:0;z-index:5;
-    background:var(--glass);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border-bottom:1px solid var(--line)}
+    background:rgba(250,247,241,.95);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
   header h1{margin:0;font-size:18px;letter-spacing:2px;color:var(--gold-deep)}
   header .back{position:absolute;left:12px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:22px;color:var(--gold-deep)}
   main{max-width:640px;margin:0 auto;padding:14px 14px calc(30px + env(safe-area-inset-bottom))}
   /* ===== 玻璃卡片（大圆角、留白充足，跟主页 .card 一致）===== */
-  .card{background:var(--glass);backdrop-filter:blur(16px) saturate(1.5);-webkit-backdrop-filter:blur(16px) saturate(1.5);
+  .card{background:var(--glass);
     border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
   textarea{width:100%;resize:none;border:1px solid var(--line);border-radius:14px;padding:12px 14px;font-size:15px;font-family:inherit;min-height:66px;outline:none;
     background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:var(--ink)}
   textarea:focus{border-color:var(--gold)}
   .row{display:flex;align-items:center;gap:8px;margin-top:10px}
   .chipbtn{border:1px solid var(--line);background:var(--glass2);border-radius:14px;padding:8px 14px;font-size:14px;font-family:inherit;color:var(--gold-deep);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-  .btn{margin-left:auto;padding:10px 20px;border:none;border-radius:14px;background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#fff;font-size:15px;box-shadow:var(--shadow)}
+  .btn{min-height:44px;margin-left:auto;padding:10px 20px;border:none;border-radius:11px;background:var(--gold-deep);color:#fff;font-size:15px;box-shadow:none}
   .thumbwrap{position:relative;display:inline-block;margin-top:10px}
   .thumbwrap img{max-width:120px;max-height:120px;border-radius:12px;display:block}
   .thumbwrap .x{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border-radius:50%;border:none;background:var(--gold-deep);color:#fff;font-size:13px;line-height:22px}
   /* ===== 一条动态：作者行 / 正文 / 图片 / 评论区（语义化 class，方便以后套皮肤）===== */
-  .moment-card{background:var(--glass);backdrop-filter:blur(16px) saturate(1.5);-webkit-backdrop-filter:blur(16px) saturate(1.5);
+  .moment-card{background:var(--glass);
     border:1px solid var(--line);border-radius:18px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow)}
   .moment-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .moment-avatar{width:34px;height:34px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 auto}
-  .moment-avatar.ke{background:rgba(140,160,205,.28)}
+  .moment-avatar.ke{background:#E9DDD3}
   .moment-avatar.user{background:var(--me)}
   .moment-who{font-size:15px;color:var(--gold-deep);font-weight:600}
   .moment-time{font-size:11px;color:var(--soft);margin-top:1px}
@@ -65,17 +53,14 @@
   .moment-img{margin-top:10px}
   .moment-img img{max-width:100%;max-height:360px;border-radius:14px;display:block;cursor:pointer}
   .moment-comments{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
-  .moment-comments .one{font-size:13.5px;line-height:1.7;color:var(--ink);margin-bottom:6px;display:flex;gap:6px;align-items:flex-start}
+  .moment-comments .one{font-size:13.5px;line-height:1.7;color:var(--ink);margin-bottom:7px;display:flex;gap:6px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:rgba(255,253,249,.72)}
   .moment-comments .one b{color:var(--gold-deep);font-weight:600;flex:0 0 auto}
-  .moment-comments .one .cdel{margin-left:auto;color:var(--soft);font-size:12px;padding:0 4px}
+  .moment-comments .one .comment-actions{display:flex;gap:2px;margin-left:auto;flex:0 0 auto}.moment-comments .one .comment-actions button{min-width:36px;min-height:36px;border:0;border-radius:10px;background:transparent;color:var(--soft);font:12px/1 inherit}.moment-comments .one .comment-actions button:active{background:var(--glass2)}
   .crow{display:flex;gap:8px;margin-top:8px}
   .crow input{flex:1;border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:14px;font-family:inherit;outline:none;
     background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:var(--ink)}
-  .crow button{border:none;background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#fff;border-radius:999px;padding:0 16px;font-size:14px}
+  .crow button{min-height:44px;border:none;background:var(--gold-deep);color:#fff;border-radius:11px;padding:0 16px;font-size:14px}
   .empty{text-align:center;color:var(--soft);font-size:14px;margin:50px 0;line-height:2}
-  #gate{position:fixed;inset:0;background:linear-gradient(165deg,var(--bg1),var(--bg2));display:none;flex-direction:column;align-items:center;justify-content:center;padding:30px;z-index:9}
-  #gate input{border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:16px;width:min(320px,80vw);text-align:center;margin:14px 0;background:var(--glass);color:var(--ink)}
-  #gate button{border:0;background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#fff;border-radius:12px;padding:12px 34px;font-size:16px}
 </style>
 </head>
 <body>
@@ -96,12 +81,6 @@
   <div id="list"><div class="empty">还没有动态，发第一条吧~</div></div>
 </main>
 
-<div id="gate">
-  <div style="font-size:34px">📷</div>
-  <input id="pc" type="password" placeholder="访问口令" />
-  <button onclick="login()">进入</button>
-</div>
-
 <script>
 const $=s=>document.querySelector(s);
 // ---- 主题：跟主页同步（读 localStorage.theme，玻璃质感靠 CSS 变量）----
@@ -110,8 +89,7 @@ const $=s=>document.querySelector(s);
   const mc={warm:"#FBF8F1",sakura:"#FBF3F5",mist:"#F2F4F9"};
   const m=document.querySelector('meta[name="theme-color"]');if(m)m.content=mc[t]||mc.warm;})();
 
-async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
-async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";load();}else alert("口令不对呀~");}
+async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){alert("服务器仍开着访问保护，需要在部署设置里关闭");throw 0;}return r;}
 
 function esc(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 function isImg(u){return /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(u||"");}
@@ -168,7 +146,7 @@ async function load(){
     const imgHtml=(m.image&&isImg(m.image))?`<div class="moment-img"><img src="${esc(m.image)}" onclick="window.open('${esc(m.image)}')" /></div>`:"";
     const comments=(m.comments||[]).map(c=>{
       const cmine=c.author==="user";
-      return `<div class="one"><b>${esc(whoName(c.author))}：</b><span>${esc(c.content)}</span>${cmine?`<span class="cdel" onclick="delComment(${c.id})">✕</span>`:""}</div>`;
+      return `<div class="one"><b>${esc(whoName(c.author))}：</b><span>${esc(c.content)}</span><span class="comment-actions">${cmine?`<button onclick="editComment(${c.id},'${esc(c.content).replace(/'/g,"&#39;")}')">改</button>`:""}<button onclick="delComment(${c.id})">删</button></span></div>`;
     }).join("");
     el.innerHTML=`
       <div class="moment-head">
@@ -193,6 +171,14 @@ async function load(){
 }
 async function delMoment(id){if(!confirm("删掉这条动态？"))return;try{await api("/api/moments/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});load();}catch(e){}}
 async function delComment(id){if(!confirm("删掉这条评论？"))return;try{await api("/api/moments/comment/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});load();}catch(e){}}
+async function editComment(id,oldContent){
+  const content=prompt("把这句话改成：",oldContent);if(content==null||!content.trim()||content.trim()===oldContent)return;
+  try{
+    await api("/api/moments/comment/edit",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,content:content.trim()})});
+    load();
+  }catch(e){
+    if(e!==0)alert("这次没改好，再试一下");
+  }}
 
 load().catch(()=>{});
 </script>

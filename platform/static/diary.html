@@ -60,16 +60,9 @@ main{max-width:640px;margin:0 auto}
 </header>
 <main id="list"><div class="empty">翻一翻…</div></main>
 
-<div id="gate">
-  <div style="font-size:34px">🌙</div>
-  <input id="pc" type="password" placeholder="悄悄话口令" />
-  <button onclick="login()">进来</button>
-</div>
-
 <script>
 const $=s=>document.querySelector(s);
-async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
-async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";load();}else alert("口令不对呀~");}
+async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){alert("服务器仍开着访问保护，需要在部署设置里关闭");throw 0;}return r;}
 
 function fmt(s){const m=String(s||"").match(/\d{4}-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);return m?`${+m[1]}月${+m[2]}日 ${m[3]}`:"";}
 function esc(t){const d=document.createElement("div");d.textContent=t;return d.innerHTML;}
