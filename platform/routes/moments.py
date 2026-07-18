@@ -66,3 +66,18 @@ def api_delete_comment():
         return jsonify({"error": "need id"}), 400
     db.delete_comment(cid)
     return jsonify({"ok": True})
+
+
+@bp.post("/api/moments/comment/edit")
+@guard
+def api_edit_comment():
+    d = jbody()
+    cid = d.get("id")
+    content = (d.get("content") or "").strip()
+    if not cid:
+        return jsonify({"error": "need id"}), 400
+    if not content:
+        return jsonify({"error": "need content"}), 400
+    if not db.edit_comment(cid, content, author="user"):
+        return jsonify({"error": "comment not found"}), 404
+    return jsonify({"ok": True})

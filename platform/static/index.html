@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#FBF8F1" />
 <link rel="manifest" href="/static/manifest.webmanifest" />
 <link rel="apple-touch-icon" href="/static/icon.png" />
+<script src="/static/ui-redesign.js?v=20260718" defer></script>
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AI 助手" />
@@ -95,13 +96,6 @@
 </style>
 </head>
 <body>
-<div id="gate">
-  <div class="big">AI&nbsp;助手</div>
-  <div style="color:var(--soft);margin:10px 0">请输入访问口令</div>
-  <input id="pc" type="password" placeholder="口令" style="max-width:260px" />
-  <button class="btn" style="max-width:260px" onclick="login()">进入</button>
-</div>
-
 <header style="position:relative">
   <button id="drawerBtn" onclick="openDrawer()" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:20px;color:var(--gold-deep)">☰</button>
   <h1 id="hdrTitle">AI&nbsp;助手</h1><div class="sub" id="hdrSub"></div>
@@ -292,7 +286,11 @@ function setTheme(t){
 setTheme((()=>{try{return localStorage.getItem("theme")||"warm";}catch(_){return "warm";}})());
 // ---- 字号（标准/大/特大）----
 function setFont(f){
-  document.body.style.zoom={std:"",big:"1.08",huge:"1.18"}[f]||"";
+  const scale={std:1,big:1.08,huge:1.18}[f]||1;
+  document.body.style.zoom=scale===1?"":String(scale);
+  document.body.style.width=scale===1?"":(100/scale)+"%";
+  document.body.style.height=scale===1?"":(100/scale)+"dvh";
+  document.body.dataset.font=f;
   try{localStorage.setItem("font",f);}catch(_){}
   document.querySelectorAll("[data-f]").forEach(b=>b.classList.toggle("on",b.dataset.f===f));
 }
@@ -309,8 +307,7 @@ async function saveMood(){
 async function loadMoods(){try{const r=await api("/api/moods");const arr=await r.json();
   $("#moodList").innerHTML=arr.slice(0,5).map(m=>`${fmtTime(m.created_at)}【${esc(m.mood)}】${m.note?esc(m.note):""}`).join("<br>")||"还没记过~";
 }catch(e){}}
-async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){$("#gate").style.display="flex";throw 0;}return r;}
-async function login(){const r=await fetch("/api/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({passcode:$("#pc").value})});if(r.ok){$("#gate").style.display="none";boot();}else alert("口令不对呀~");}
+async function api(path,opt){const r=await fetch(path,opt);if(r.status===401){toast("服务器仍开着访问保护，需要在部署设置里关闭");throw 0;}return r;}
 
 function nowHM(){const d=new Date();return pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function fmtTime(s){if(!s)return"";const m=String(s).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);if(!m)return"";const d=m[1]+"-"+m[2]+"-"+m[3];return (d===todayStr()?"":m[2]+"/"+m[3]+" ")+m[4]+":"+m[5];}
@@ -323,7 +320,7 @@ function bubble(role,text,time,image,mid){const w=document.createElement("div");
   if(role==="user"){w.appendChild(bb);w.appendChild(tag);}else{w.appendChild(tag);w.appendChild(bb);}
   msgs.appendChild(w);scroll();bb._tag=tag;bb._who=who;bb._tx=tx;if(mid)bindLongPress(bb,mid,role);return bb;}
 function setBubbleTime(bb,t){if(bb&&bb._tag)bb._tag.textContent=bb._who+" · "+t;}
-// 长按(手机)/右键(电脑)弹菜单：⭐收进小本本 / 🗑删掉这条
+// 长按(手机)/右键(电脑)弹菜单：普通界面只说人话，不露记忆检索字段。
 function bindLongPress(el,mid,role){let tm=null;const cancel=()=>{if(tm)clearTimeout(tm);tm=null;};
   el.addEventListener("touchstart",()=>{tm=setTimeout(()=>{cancel();showMsgMenu(el,mid,role);},600);},{passive:true});
   el.addEventListener("touchend",cancel);el.addEventListener("touchmove",cancel);
@@ -334,16 +331,52 @@ function showMsgMenu(el,mid,role){
   const ov=document.createElement("div");ov.id="msgMenu";
   ov.style.cssText="position:fixed;inset:0;z-index:15;background:rgba(60,50,40,.25);display:flex;align-items:flex-end;justify-content:center";
   const box=document.createElement("div");
-  box.style.cssText="width:100%;max-width:420px;margin:0 10px calc(14px + env(safe-area-inset-bottom));background:var(--glass);backdrop-filter:blur(20px) saturate(1.5);-webkit-backdrop-filter:blur(20px) saturate(1.5);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow)";
+  box.style.cssText="width:100%;max-width:520px;margin:0;background:#fffdf9;border:1px solid var(--line);border-bottom:0;border-radius:24px 24px 0 0;overflow:hidden;box-shadow:0 -12px 36px rgba(63,40,34,.12);padding-bottom:env(safe-area-inset-bottom)";
   const mkBtn=(label,fn,color)=>{const b=document.createElement("button");b.textContent=label;
     b.style.cssText="display:block;width:100%;border:none;background:none;padding:14px;font-size:15px;font-family:inherit;border-bottom:1px solid var(--line);color:"+(color||"var(--ink)");
     b.onclick=()=>{ov.remove();fn&&fn();};box.appendChild(b);};
-  if(text)mkBtn("⭐ 收进小本本",()=>starMsg(text,mid,role));
-  mkBtn("🗑 删掉这条",()=>delMsg(mid),"var(--soft)");
+  if(role!=="user"){
+    mkBtn("柯想起了什么",()=>showRecallDrawer(mid,text));
+    if(text)mkBtn("复制",()=>copyMessageText(text));
+    mkBtn("重新回复",()=>promptFromMessage("请重新回复你刚才那句话。"));
+    mkBtn("继续说下去",()=>promptFromMessage("继续说下去，我在听。"));
+  }else{
+    if(text)mkBtn("复制",()=>copyMessageText(text));
+    mkBtn("删掉这条",()=>delMsg(mid),"var(--soft)");
+  }
   mkBtn("取消",null,"var(--soft)");
   box.lastChild.style.borderBottom="none";
   ov.appendChild(box);ov.onclick=e=>{if(e.target===ov)ov.remove();};
   document.body.appendChild(ov);}
+async function copyMessageText(text){
+  try{await navigator.clipboard.writeText(text);toast("已经复制好了");}
+  catch(_){const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("已经复制好了");}}
+function promptFromMessage(text){const input=$("#input");if(!input)return;input.value=text;input.focus();send();}
+function recallText(item){
+  if(!item||typeof item!=="object")return"";
+  const direct=item.content||item.memory_content||item.text||item.memory||item.summary;
+  if(typeof direct==="string"&&direct.trim())return direct.trim();
+  return"";}
+async function showRecallDrawer(mid,text){
+  const make=window.goodloveMakeSheet;
+  if(!make){toast("回忆抽屉正在准备，再试一下");return;}
+  const layer=make(`<div class="sheet-head"><div><h2>柯想起了什么</h2><p>这些回忆让柯更懂得该怎样接住这句话。</p></div><button class="sheet-close" aria-label="关闭">×</button></div><div id="recallList"><div class="memory-empty">柯正在回想这一刻…</div></div><div class="sheet-actions"><button id="recallStar">珍藏这句话</button><button class="sheet-close">收好</button></div>`);
+  layer.querySelector("#recallStar")?.addEventListener("click",()=>{starMsg(text,mid,"assistant");layer.remove();});
+  try{
+    const data=await(await api("/api/memory/injection-log")).json();
+    const rows=Array.isArray(data)?data:(Array.isArray(data.items)?data.items:[]);
+    const matched=rows.filter(x=>String(x.msg_id||x.message_id||"")===String(mid));
+    const pool=(matched.length?matched:rows.slice(0,3));
+    const memories=[];
+    pool.forEach(item=>{
+      const nested=[item,...(Array.isArray(item.memories)?item.memories:[]),...(Array.isArray(item.items)?item.items:[])];
+      nested.forEach(x=>{const value=recallText(x);if(value&&!memories.includes(value))memories.push(value);});
+    });
+    const list=layer.querySelector("#recallList");
+    list.innerHTML=memories.length?memories.slice(0,4).map((value,index)=>`<div class="recall-card"><strong>${index===0?"这件事在心里亮了一下":"还有一段相关的回忆"}</strong><p>${esc(value)}</p></div>`).join(""):`<div class="recall-card"><strong>这次没有翻出具体卡片</strong><p>柯主要顺着你们正在说的话回答，但仍会带着对佳佳一贯的理解。</p></div>`;
+  }catch(_){
+    const list=layer.querySelector("#recallList");if(list)list.innerHTML=`<div class="recall-card"><strong>这次没有翻出具体卡片</strong><p>柯主要顺着眼前这段对话回答，没有把技术记录摆到你面前。</p></div>`;
+  }}
 async function starMsg(text,mid,role){
   try{await api("/api/treasures",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({content:text,msg_id:mid,author:role==="user"?"user":"assistant"})});
     toast("已收进小本本 ⭐");}catch(e){if(e!==0)toast("没收上，再试一下~");}}
@@ -365,6 +398,8 @@ function scrollHard(){scroll();requestAnimationFrame(scroll);setTimeout(scroll,1
 
 // ---- 会话（多条对话切换）----
 let currentSid=(()=>{try{return +localStorage.getItem("sid")||1;}catch(_){return 1;}})();
+var selectedModel=(()=>{try{return localStorage.getItem("chat_model")||"";}catch(_){return "";}})();
+function setChatModel(model){selectedModel=model||"";try{localStorage.setItem("chat_model",selectedModel);}catch(_){}}
 function setSid(id){currentSid=id;try{localStorage.setItem("sid",id);}catch(_){}}
 // 分句显示：助手消息按 ||| 拆成几条泡泡（像微信一句句发）；没分隔符就原样一条
 function splitParts(s){return (s||"").split(/\s*\|\|\|\s*/).map(x=>x.trim()).filter(Boolean);}
@@ -408,7 +443,7 @@ async function send(){const t=$("#input").value.trim();const img=pending?pending
     const parts=acc.split("|||");
     while(bubbles.length<parts.length)bubbles.push(bubble("assistant",""));
     parts.forEach((p,i)=>{let s=p;if(i===parts.length-1)s=s.replace(/\|+\s*$/,"");bubbles[i]._tx.textContent=s.trim();});scroll();}
-  const r=await api("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t,image:img,session_id:currentSid,bedroom:BD})});
+  const r=await api("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t,image:img,session_id:currentSid,bedroom:BD,model:selectedModel||undefined})});
   const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
   while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf("\n\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith("data:"))continue;try{const e=JSON.parse(line.slice(5).trim());if(e.think){b.classList.remove("typing");if(!b._th){const d=document.createElement("details");d.style.cssText="margin-bottom:6px;font-size:12.5px;color:var(--soft)";d.innerHTML='<summary style="cursor:pointer">💭 想了想…</summary>';const p=document.createElement("div");p.style.cssText="white-space:pre-wrap;margin-top:4px";d.appendChild(p);b.prepend(d);b._th=p;}b._th.textContent+=e.think;scroll();}if(e.t){acc+=e.t;b.classList.remove("typing");paint();}}catch(_){}}}
   b.classList.remove("typing");

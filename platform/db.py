@@ -894,6 +894,15 @@ def delete_comment(cid):
     conn.execute("DELETE FROM moment_comments WHERE id=?", (cid,))
     conn.commit(); conn.close()
 
+def edit_comment(cid, content, author="user"):
+    """改一条朋友圈评论；界面只能改佳佳自己发出的评论。"""
+    conn = get_db()
+    cur = conn.execute(
+        "UPDATE moment_comments SET content=? WHERE id=? AND author=?",
+        (content, cid, author))
+    conn.commit(); changed = cur.rowcount > 0; conn.close()
+    return changed
+
 # ---- 时间胶囊 ----
 def add_capsule(title, content, open_at, image=""):
     conn = get_db()
