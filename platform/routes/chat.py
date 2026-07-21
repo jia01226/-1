@@ -83,7 +83,7 @@ def api_chat():
     bedroom = bool(data.get("bedroom"))                # 卧室模式（bedroom.py 只在服务器本地）
     if bedroom:
         logger.info("[bedroom] 前端的卧室开关已送达后端")
-    model = chat_ai.resolve_model(data.get("model"))   # 前端可选模型，白名单外回落默认
+    model, gw_base, gw_key = chat_ai.resolve_gateway(data.get("model"))  # 选 GPT 就走 GPT 通道，否则默认(Claude)；乱传安全回落
     db.add_message("user", text, session_id=sid, image=image, msg_type=("image" if image else "text"))
     history = db.recent_messages(session_id=sid)
     posts = db.retrieve_l2("single")   # 单聊记忆：active 的 L2 卡，已排除 no_model/已忘/已归档/repo-only
@@ -98,7 +98,7 @@ def api_chat():
 
     def gen():
         acc = ""
-        for piece in chat_ai.stream_chat(history, posts, model=model, bedroom=bedroom):
+        for piece in chat_ai.stream_chat(history, posts, model=model, bedroom=bedroom, api_base=gw_base, api_key=gw_key):
             if isinstance(piece, tuple):
                 if piece[0] == USAGE_TAG:
                     usage = piece[1] or {}
@@ -135,8 +135,9 @@ def api_chat():
 @bp.get("/api/models")
 @guard
 def api_models():
-    """给前端模型选择器（知言的 UI 调这个）：可选模型（白名单）+ 当前默认。"""
-    return jsonify({"models": chat_ai.MODEL_WHITELIST, "default": chat_ai.MODEL})
+    """给前端模型选择器（知言的 UI 调这个）：Claude 白名单 + GPT（若已配）+ 当前默认。
+    返回向后兼容：models(扁平id列表)/default 照旧；另加 options(带 provider 分组)/gpt_enabled 供 UI 分组。"""
+    return jsonify(chat_ai.available_models())
 
 
 @bp.get("/api/messages")
