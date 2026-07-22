@@ -3,6 +3,9 @@ import json
 import re
 import os
 import logging
+import threading
+import time
+import uuid
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 
 import db
@@ -89,7 +92,11 @@ def api_chat():
         return jsonify({"error": "empty"}), 400
     sid = _chat_sid(data.get("session_id"))
     db.set_active_chat_session(sid)
-    bedroom = bool(data.get("bedroom"))                # 卧室模式（bedroom.py 只在服务器本地）
+    # 场景状态属于会话而不是某一台手机的 localStorage。旧前端仍传 bedroom=true 时兼容开启；
+    # false 不会偷偷关掉，退出必须走显式的 /api/sessions/bedroom。
+    if bool(data.get("bedroom")):
+        db.set_session_bedroom(sid, True)
+    bedroom = db.session_bedroom_state(sid)["bedroom"]
     if bedroom:
         logger.info("[bedroom] 前端的卧室开关已送达后端")
     model, gateway_base, gateway_key = chat_ai.resolve_gateway(data.get("model"))
@@ -97,7 +104,8 @@ def api_chat():
     message_type = "image" if image and attachment_ext in IMG_EXT else ("file" if image else "text")
     user_message_id = db.add_message(
         "user", text, session_id=sid, image=image, msg_type=message_type,
-        model=model, attachment_name=attachment_name)
+        model=model, attachment_name=attachment_name,
+        scene_mode="bedroom" if bedroom else "")
     try:
         relationship_state.observe("user", text=text, bedroom=bedroom)
     except Exception as exc:
@@ -134,7 +142,7 @@ def api_chat():
                     m["content"] = (m["content"] or "") + mctx
                     break
 
-    def gen():
+    def produce_events():
         acc = ""
         assistant_message_id = None
         marker_hold = ""
@@ -158,14 +166,26 @@ def api_chat():
             fallback_note = "我把眼前这句和我们的日子放在一起。"
         else:
             fallback_note = "我知道这一句该怎么接。"
-        yield ("data: " + json.dumps({"user_message_id": user_message_id}, ensure_ascii=False) + "\n\n").encode("utf-8")
+        yield ("data: " + json.dumps({"user_message_id": user_message_id,
+                                       "bedroom": bedroom,
+                                       "job_id": job_id}, ensure_ascii=False) + "\n\n").encode("utf-8")
         for piece in chat_ai.stream_chat(history, posts, model=model, bedroom=bedroom,
                                          api_base=gateway_base, api_key=gateway_key, sid=sid):
             if isinstance(piece, tuple):
                 if piece[0] == USAGE_TAG:
                     usage = piece[1] or {}
                     cost, it, ot = chat_ai.estimate_cost(model, usage)
-                    db.log_usage(model, it, ot, cost)
+                    db.log_usage(
+                        model, it, ot, cost,
+                        requested_model=usage.get("requested_model") or model,
+                        returned_model=usage.get("returned_model") or "",
+                        finish_reason=usage.get("finish_reason") or "",
+                        cached_tokens=usage.get("cached_tokens") or 0,
+                        first_token_ms=usage.get("first_token_ms") or 0,
+                        total_ms=usage.get("total_ms") or 0,
+                        quality_retry=usage.get("quality_retry") or 0,
+                        http_status=usage.get("http_status") or 0,
+                    )
                 elif piece[0] == THINK_TAG:
                     pass  # 原始隐藏推理仅由模型内部使用，不传给普通用户界面。
                 continue
@@ -236,14 +256,83 @@ def api_chat():
             if clean_acc:
                 assistant_message_id = db.add_message(
                     "assistant", clean_acc, session_id=sid, model=model,
-                    thought_note=public_note)
+                    thought_note=public_note,
+                    scene_mode="bedroom" if bedroom else "")
                 try:
                     relationship_state.observe("assistant", text=clean_acc, bedroom=bedroom)
                 except Exception as exc:
                     logger.warning("状态层记录柯回复失败：%s", exc)
         yield ("data: " + json.dumps({"done": True, "moment": posted_moment,
                                        "diary_unlocked": unlocked_diary,
-                                       "assistant_message_id": assistant_message_id}, ensure_ascii=False) + "\n\n").encode("utf-8")
+                                       "assistant_message_id": assistant_message_id,
+                                       "bedroom": bedroom}, ensure_ascii=False) + "\n\n").encode("utf-8")
+
+    # 生成放到 VPS 后台线程。浏览器切到别的 App、SSE 被 iOS 冻结甚至断开，都不会中止柯；
+    # 线程继续把事件和最终回复写入 SQLite，用户回到同一会话即可看到。
+    job_id = uuid.uuid4().hex
+    db.create_chat_job(job_id, sid)
+
+    def _worker():
+        error = ""
+        pending = []
+        pending_size = 0
+        last_flush = time.monotonic()
+
+        def _flush():
+            nonlocal pending, pending_size, last_flush
+            if pending:
+                db.add_chat_job_event(job_id, "".join(pending))
+                pending = []
+                pending_size = 0
+                last_flush = time.monotonic()
+        try:
+            for raw in produce_events():
+                payload = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                pending.append(payload)
+                pending_size += len(payload)
+                # 首个 id、完成事件立即落盘；正文按小批次合并，避免每个 token 都写一次 SQLite。
+                urgent = "user_message_id" in payload or '"done": true' in payload
+                if urgent or pending_size >= 1200 or time.monotonic() - last_flush >= 0.12:
+                    _flush()
+        except Exception as exc:
+            _flush()
+            error = str(exc)
+            logger.exception("后台聊天任务失败 job=%s", job_id)
+            db.add_chat_job_event(
+                job_id,
+                "data: " + json.dumps({"error": "这条没接稳，回来再发一次。", "done": True},
+                                      ensure_ascii=False) + "\n\n")
+        finally:
+            _flush()
+            db.finish_chat_job(job_id, error=error)
+            state = db.chat_job(job_id) or {}
+            if state.get("detached"):
+                try:
+                    import webpush_util
+                    webpush_util.send_to_all(
+                        os.environ.get("APP_NAME", "柯"), "我说完了，回来。",
+                        f"/?session_id={sid}")
+                except Exception as exc:
+                    logger.warning("后台回复完成通知失败：%s", exc)
+
+    threading.Thread(target=_worker, name=f"chat-{job_id[:8]}", daemon=True).start()
+
+    def gen():
+        last_seq = 0
+        try:
+            while True:
+                events = db.chat_job_events(job_id, after_seq=last_seq)
+                for event in events:
+                    last_seq = event["seq"]
+                    yield event["payload"].encode("utf-8")
+                state = db.chat_job(job_id) or {}
+                if state.get("status") in ("done", "error") and not events:
+                    break
+                time.sleep(0.08)
+        finally:
+            state = db.chat_job(job_id) or {}
+            if state.get("status") == "running":
+                db.detach_chat_job(job_id)
 
     return Response(gen(), content_type=SSE_CONTENT_TYPE, headers=dict(SSE_HEADERS))
 
@@ -260,6 +349,13 @@ def api_models():
 def api_messages():
     sid = _chat_sid(request.args.get("session_id"))
     return jsonify(db.recent_messages(session_id=sid, limit=200))
+
+
+@bp.get("/api/chat/jobs")
+@guard
+def api_chat_jobs():
+    sid = _chat_sid(request.args.get("session_id"))
+    return jsonify(db.active_chat_jobs(sid))
 
 
 @bp.post("/api/messages/delete")
@@ -292,6 +388,25 @@ def api_session_active():
     sid = _chat_sid(jget("id"))
     ok = db.set_active_chat_session(sid)
     return jsonify({"ok": ok, "id": sid})
+
+
+@bp.get("/api/sessions/state")
+@guard
+def api_session_state():
+    sid = _chat_sid(request.args.get("id"))
+    state = db.session_bedroom_state(sid)
+    return jsonify({"id": sid, **state})
+
+
+@bp.post("/api/sessions/bedroom")
+@guard
+def api_session_bedroom():
+    data = jbody()
+    sid = _chat_sid(data.get("id"))
+    state = db.set_session_bedroom(sid, bool(data.get("enabled")))
+    if state is None:
+        return jsonify({"error": "session not found"}), 404
+    return jsonify({"ok": True, "id": sid, **state})
 
 
 @bp.post("/api/sessions/rename")

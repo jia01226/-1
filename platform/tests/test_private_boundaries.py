@@ -103,6 +103,57 @@ class PrivateBoundaryTests(unittest.TestCase):
         self.assertTrue(self.db.delete_chat_session(new_sid))
         self.assertEqual(self.db.active_chat_session_id(), 1)
 
+    def test_bedroom_state_is_session_scoped_and_scene_ledger_starts_clean(self):
+        old = self.db.add_message("assistant", "进入场景前的假旧回复", session_id=1)
+        self.assertFalse(self.db.session_bedroom_state(1)["bedroom"])
+        state = self.db.set_session_bedroom(1, True)
+        self.assertTrue(state["bedroom"])
+        self.assertEqual(state["scene_started_after"], old)
+
+        self.db.add_message(
+            "user", "只用于测试的现场反馈", session_id=1, scene_mode="bedroom")
+        self.db.add_message(
+            "assistant", "只用于测试的连续回复", session_id=1, scene_mode="bedroom")
+        ledger = self.db.recent_scene_ledger(1)
+        self.assertEqual([item["author"] for item in ledger], ["user", "assistant"])
+        self.assertNotIn("进入场景前", repr(ledger))
+
+        other = self.db.create_chat_session("另一个临时会话")
+        self.assertFalse(self.db.session_bedroom_state(other)["bedroom"])
+        self.assertTrue(self.db.session_bedroom_state(1)["bedroom"])
+        self.db.set_session_bedroom(1, False)
+        self.assertEqual(self.db.recent_scene_ledger(1), [])
+
+    def test_gateway_audit_keeps_requested_and_returned_model_separate(self):
+        self.db.log_usage(
+            "requested-alias", 12, 7, 0.01,
+            requested_model="requested-alias", returned_model="real-upstream-model",
+            finish_reason="stop", cached_tokens=5)
+        conn = self.db.get_db()
+        row = conn.execute(
+            "SELECT requested_model,returned_model,finish_reason,cached_tokens "
+            "FROM gateway_usage ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        self.assertEqual(row["requested_model"], "requested-alias")
+        self.assertEqual(row["returned_model"], "real-upstream-model")
+        self.assertEqual(row["finish_reason"], "stop")
+        self.assertEqual(row["cached_tokens"], 5)
+
+    def test_background_chat_job_persists_events_and_finishes(self):
+        self.db.create_chat_job("temporary-job", 1)
+        seq = self.db.add_chat_job_event(
+            "temporary-job", 'data: {"t":"临时片段"}\n\n')
+        self.assertGreater(seq, 0)
+        self.assertEqual(len(self.db.active_chat_jobs(1)), 1)
+        self.db.detach_chat_job("temporary-job")
+        self.db.finish_chat_job("temporary-job")
+        job = self.db.chat_job("temporary-job")
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["detached"], 1)
+        self.assertEqual(self.db.active_chat_jobs(1), [])
+        self.assertIn("临时片段", self.db.chat_job_events("temporary-job")[0]["payload"])
+
     def test_public_thought_note_is_saved_outside_chat_body(self):
         message_id = self.db.add_message(
             "assistant", "这是聊天正文", session_id=1,
@@ -223,6 +274,43 @@ class AttachmentAndPrivateRegressionTests(unittest.TestCase):
         self.assertEqual(image_content[-1]["type"], "image_url")
         self.assertTrue(image_content[-1]["image_url"]["url"].startswith("data:image/png;base64,"))
 
+    def test_chat_generation_finishes_in_server_job_without_real_model_call(self):
+        try:
+            import flask  # noqa: F401
+        except ImportError:
+            self.skipTest("本机精简 Python 未安装 Flask；部署前在服务器 venv 再跑")
+        import app as app_module
+        import routes.chat as chat_route
+
+        original = chat_route.chat_ai.stream_chat
+
+        def fake_stream(_history, _posts, **_kwargs):
+            yield "<ke_note>这是临时后台测试念头</ke_note>"
+            yield "这是临时后台测试回复。"
+            yield ("__usage__", {
+                "prompt_tokens": 3, "completion_tokens": 2,
+                "requested_model": "fake", "returned_model": "fake-upstream",
+                "first_token_ms": 4, "total_ms": 8, "http_status": 200,
+            })
+
+        chat_route.chat_ai.stream_chat = fake_stream
+        try:
+            client = app_module.app.test_client()
+            response = client.post(
+                "/api/chat",
+                json={"text": "只用于后台任务测试", "session_id": 1, "model": "fake"},
+                buffered=True,
+            )
+        finally:
+            chat_route.chat_ai.stream_chat = original
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("这是临时后台测试回复", response.get_data(as_text=True))
+        messages = self.db.recent_messages(1)
+        self.assertEqual(messages[-1]["content"], "这是临时后台测试回复。")
+        self.assertEqual(messages[-1]["thought_note"], "这是临时后台测试念头")
+        self.assertEqual(self.db.active_chat_jobs(1), [])
+
     def test_proactive_message_uses_active_session_without_real_model_call(self):
         previous_requests = sys.modules.get("requests")
         if previous_requests is None:
@@ -324,6 +412,45 @@ class AttachmentAndPrivateRegressionTests(unittest.TestCase):
         self.db.delete_moment(recent_id)
         self.assertEqual(moments.related_moments("猫粮快没有了", limit=2, max_age_days=14), [])
 
+    def test_embedding_auth_is_normalized_without_real_network_call(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace(post=None)
+        import vector_search
+        vector = importlib.reload(vector_search)
+        captured = {}
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def json():
+                return {"data": [{"index": 0, "embedding": [0.1, 0.2]}]}
+
+        original_post = vector.requests.post
+        original_key = vector.EMBED_API_KEY
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
+            return FakeResponse()
+
+        vector.requests.post = fake_post
+        vector.EMBED_API_KEY = '"Bearer temporary-secret"'
+        try:
+            result = vector._embed_gateway(["临时向量测试"])
+        finally:
+            vector.requests.post = original_post
+            vector.EMBED_API_KEY = original_key
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+
+        self.assertEqual(result, [[0.1, 0.2]])
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer temporary-secret")
+        self.assertEqual(captured["json"]["input"], ["临时向量测试"])
+
     def test_current_quality_guard_is_after_legacy_private_rules(self):
         """模拟服务器仍有旧 3000 字规则，确认新版护栏最终覆盖它。"""
         fake_bedroom = types.SimpleNamespace(
@@ -348,7 +475,12 @@ class AttachmentAndPrivateRegressionTests(unittest.TestCase):
             chat_ai._drawer_block = lambda: ""
             chat_ai._now_context = lambda: "测试当下"
             try:
-                prompt = chat_ai.build_system_prompt([], query="测试", bedroom=True)
+                prompt = chat_ai.build_system_prompt(
+                    [], query="测试", bedroom=True,
+                    scene_ledger=[
+                        {"author": "user", "content": "临时现场事实"},
+                        {"author": "assistant", "content": "临时上一拍回复"},
+                    ])
                 self.assertIn("invented_climax", chat_ai._bedroom_output_issues("你终于高潮了。", "我没有说高潮"))
                 self.assertEqual(chat_ai._bedroom_output_issues("不许你高潮。", "我没有说高潮"), [])
                 self.assertTrue(chat_ai._bedroom_output_issues("不知过了多久，一切结束。", ""))
@@ -369,6 +501,8 @@ class AttachmentAndPrivateRegressionTests(unittest.TestCase):
 
         self.assertGreater(prompt.rfind("不设固定字数"), prompt.rfind("一段必须 3000 字"))
         self.assertIn("只能依据佳佳的真实反馈", prompt)
+        self.assertIn("本轮同一场景的连续性账本", prompt)
+        self.assertIn("旧助手话只代表柯当时说过什么", prompt)
 
 
 class IntimatePromptContractTests(unittest.TestCase):
@@ -391,6 +525,25 @@ class IntimatePromptContractTests(unittest.TestCase):
     def test_lazy_time_skips_are_forbidden(self):
         self.assertIn("不知过了多久", self.source)
         self.assertIn("不得用模糊时间跳跃偷工", self.source)
+
+    def test_action_checklist_is_rejected_without_fixed_minimum_length(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        try:
+            import chat_ai
+            issues = chat_ai._bedroom_output_issues(
+                "按住。抬高。压下。伸手。继续。停住。开始。", "测试反馈")
+            dense = chat_ai._bedroom_output_issues(
+                "柯没有把动作拆成清单。他仍停在刚才的位置，手掌沿着已经确认的姿势慢慢收紧，"
+                "只推进眼前这一拍，然后等她亲口说出真实反应。", "测试反馈")
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+        self.assertIn("action_checklist", issues)
+        self.assertNotIn("action_checklist", dense)
 
     def test_living_voice_rule_rejects_assistant_templates(self):
         self.assertIn("活人感与表达节奏", self.source)

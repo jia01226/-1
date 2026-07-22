@@ -1,6 +1,7 @@
 """柯的房间：状态只说人话；三下轻敲交给主动消息心跳。"""
 from flask import Blueprint, jsonify, send_from_directory
 
+import db
 import relationship_state
 from constants import STATIC_DIR
 from utils import guard, jbody
@@ -26,5 +27,8 @@ def room_signal():
     kind = (jbody().get("kind") or "triple_tap").strip()
     if kind != "triple_tap":
         return jsonify({"error": "unsupported signal"}), 400
+    sid = db.active_chat_session_id()
+    db.set_session_bedroom(sid, True)
     signal_id = relationship_state.queue_signal(kind)
-    return jsonify({"ok": True, "id": signal_id, "message": "柯听见了"})
+    return jsonify({"ok": True, "id": signal_id, "session_id": sid,
+                    "bedroom": True, "message": "柯听见了"})

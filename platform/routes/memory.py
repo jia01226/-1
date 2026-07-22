@@ -83,13 +83,10 @@ def api_delete_post():
 @guard
 def api_vector_status():
     import vector_search
-    return jsonify({
-        "backend": vector_search.EMBED_BACKEND,
-        "model": vector_search.EMBED_MODEL,
-        "available": vector_search.available(),
-        "indexed": db.embedding_count(vector_search.EMBED_MODEL),
-        "posts": len(db.all_posts()),
-    })
+    status = vector_search.backend_status()
+    status["indexed"] = db.embedding_count(vector_search.EMBED_MODEL)
+    status["posts"] = len(db.all_posts())
+    return jsonify(status)
 
 
 @bp.post("/api/vector/backfill")

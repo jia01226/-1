@@ -46,6 +46,9 @@ COOL_W = float(os.environ.get("VEC_COOL_W", "0.15"))
 COOL_HOURS = float(os.environ.get("VEC_COOL_HOURS", "48"))
 
 _backend_ready = None      # None=未检测, True/False=检测结果
+_backend_checked_at = 0.0  # 失败不能永久缓存；换 key/网络恢复后自动重试
+_backend_error = ""
+BACKEND_RETRY_SECONDS = int(os.environ.get("EMBED_RETRY_SECONDS", "300"))
 _local_model = None        # 本地模型懒加载缓存
 
 
@@ -53,7 +56,16 @@ _local_model = None        # 本地模型懒加载缓存
 def _embed_gateway(texts):
     """调中转的 OpenAI 兼容 /embeddings。失败抛异常。"""
     url = EMBED_API_BASE + "/embeddings"
-    headers = {"Authorization": f"Bearer {EMBED_API_KEY}", "Content-Type": "application/json"}
+    key = (EMBED_API_KEY or "").strip().strip('"').strip("'")
+    if not key:
+        raise RuntimeError("embeddings 未配置 EMBED_API_KEY")
+    auth = key if key.lower().startswith("bearer ") else f"Bearer {key}"
+    headers = {
+        "Authorization": auth,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "goodlove-memory/1.0",
+    }
     r = requests.post(url, headers=headers,
                       json={"model": EMBED_MODEL, "input": texts}, timeout=60)
     if r.status_code != 200:
@@ -87,16 +99,33 @@ def embed(texts):
 
 def available():
     """语义向量后端是否可用（探测一次并缓存）。不可用则降级关键词检索。"""
-    global _backend_ready
-    if _backend_ready is not None:
+    global _backend_ready, _backend_checked_at, _backend_error
+    now = time.time()
+    if _backend_ready is True:
         return _backend_ready
+    if _backend_ready is False and now - _backend_checked_at < BACKEND_RETRY_SECONDS:
+        return False
     try:
         v = embed(["助手测试一下向量"])
         _backend_ready = bool(v and v[0])
+        _backend_error = "" if _backend_ready else "embeddings 返回空向量"
     except Exception as e:
         print("[vector] 语义后端不可用，降级关键词检索：", e)
         _backend_ready = False
+        _backend_error = str(e)[:300]
+    _backend_checked_at = now
     return _backend_ready
+
+
+def backend_status():
+    """不暴露密钥的诊断信息，方便区分配置、认证与临时网络故障。"""
+    return {
+        "available": available(),
+        "backend": EMBED_BACKEND,
+        "model": EMBED_MODEL,
+        "last_error": _backend_error,
+        "retry_seconds": BACKEND_RETRY_SECONDS,
+    }
 
 
 # ============ 向量打包/相似度（纯 Python，无 numpy 依赖）============

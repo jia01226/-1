@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     model TEXT DEFAULT '',         -- 生成这条消息时实际选择的模型（只做归因，不参与人格判断）
     thought_note TEXT DEFAULT '',  -- 柯主动给佳佳看的短念头；不是供应商隐藏推理
     attachment_name TEXT DEFAULT '', -- 用户原始文件名；存储文件名是随机 UUID
+    scene_mode TEXT DEFAULT '',    -- 生成时所在场景；用于同一场景连续性，不等同永久记忆
     created_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
@@ -35,6 +36,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     name TEXT DEFAULT '和助手的悄悄话',
     summary TEXT DEFAULT '',
     summary_version TEXT DEFAULT '', -- 摘要属于哪一版人格；人格变化后旧摘要不再注入
+    bedroom_mode INTEGER DEFAULT 0,  -- 当前会话是否处于持续亲密场景
+    scene_started_after INTEGER DEFAULT 0, -- 本轮场景开始前的最后消息 id
     created_at DATETIME DEFAULT (datetime('now','+8 hours')),
     updated_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
@@ -43,6 +46,14 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 CREATE TABLE IF NOT EXISTS gateway_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model TEXT DEFAULT '',
+    requested_model TEXT DEFAULT '',
+    returned_model TEXT DEFAULT '',
+    finish_reason TEXT DEFAULT '',
+    cached_tokens INTEGER DEFAULT 0,
+    first_token_ms INTEGER DEFAULT 0,
+    total_ms INTEGER DEFAULT 0,
+    quality_retry INTEGER DEFAULT 0,
+    http_status INTEGER DEFAULT 0,
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0,
@@ -199,6 +210,24 @@ CREATE TABLE IF NOT EXISTS moments (
     updated_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
+-- 后台聊天任务：手机切去别的 App 后，生成仍在 VPS 继续，结果照常落回原会话。
+CREATE TABLE IF NOT EXISTS chat_jobs (
+    id TEXT PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'running',
+    detached INTEGER DEFAULT 0,
+    error TEXT DEFAULT '',
+    created_at DATETIME DEFAULT (datetime('now','+8 hours')),
+    updated_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_job_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
 -- 当前真正打开的 1 对 1 会话。主动消息必须跟到这里，不能永远写死旧主会话。
 CREATE TABLE IF NOT EXISTS chat_runtime_state (
     id INTEGER PRIMARY KEY CHECK (id=1),
@@ -306,6 +335,19 @@ def get_db():
 def init_db():
     conn = get_db()
     conn.executescript(SCHEMA)
+    # 服务重启后旧线程不可能继续，把遗留 running 标为中断；正常聊天记录不受影响。
+    conn.execute(
+        "UPDATE chat_jobs SET status='error',error='service restarted',"
+        "updated_at=datetime('now','+8 hours') WHERE status='running'"
+    )
+    # 流式事件只用于短时续接，完成两天后清理；最终回复已在 chat_messages 中永久保存。
+    conn.execute(
+        "DELETE FROM chat_job_events WHERE job_id IN ("
+        "SELECT id FROM chat_jobs WHERE status!='running' AND updated_at<datetime('now','-2 days'))"
+    )
+    conn.execute(
+        "DELETE FROM chat_jobs WHERE status!='running' AND updated_at<datetime('now','-2 days')"
+    )
     # 旧库平滑升级：补上 visibility 列（已存在则跳过）
     cols = [r["name"] for r in conn.execute("PRAGMA table_info(posts)").fetchall()]
     if "visibility" not in cols:
@@ -342,12 +384,31 @@ def init_db():
         conn.execute("ALTER TABLE chat_messages ADD COLUMN thought_note TEXT DEFAULT ''")
     if "attachment_name" not in mcols:
         conn.execute("ALTER TABLE chat_messages ADD COLUMN attachment_name TEXT DEFAULT ''")
+    if "scene_mode" not in mcols:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN scene_mode TEXT DEFAULT ''")
     # 旧库平滑升级：会话表补 summarized_until（会话总结用：已折叠到摘要的最大消息 id）
     scols = [r["name"] for r in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
     if "summarized_until" not in scols:
         conn.execute("ALTER TABLE chat_sessions ADD COLUMN summarized_until INTEGER DEFAULT 0")
     if "summary_version" not in scols:
         conn.execute("ALTER TABLE chat_sessions ADD COLUMN summary_version TEXT DEFAULT ''")
+    if "bedroom_mode" not in scols:
+        conn.execute("ALTER TABLE chat_sessions ADD COLUMN bedroom_mode INTEGER DEFAULT 0")
+    if "scene_started_after" not in scols:
+        conn.execute("ALTER TABLE chat_sessions ADD COLUMN scene_started_after INTEGER DEFAULT 0")
+    ucols = [r["name"] for r in conn.execute("PRAGMA table_info(gateway_usage)").fetchall()]
+    for _name, _decl in {
+        "requested_model": "TEXT DEFAULT ''",
+        "returned_model": "TEXT DEFAULT ''",
+        "finish_reason": "TEXT DEFAULT ''",
+        "cached_tokens": "INTEGER DEFAULT 0",
+        "first_token_ms": "INTEGER DEFAULT 0",
+        "total_ms": "INTEGER DEFAULT 0",
+        "quality_retry": "INTEGER DEFAULT 0",
+        "http_status": "INTEGER DEFAULT 0",
+    }.items():
+        if _name not in ucols:
+            conn.execute(f"ALTER TABLE gateway_usage ADD COLUMN {_name} {_decl}")
     # 旧库平滑升级：日记表补 kind 列（diary=睡前日记 / dream=昨晚的梦）
     dcols = [r["name"] for r in conn.execute("PRAGMA table_info(diaries)").fetchall()]
     if "kind" not in dcols:
@@ -401,14 +462,14 @@ def init_db():
 
 # ---- 便捷读写 ----
 def add_message(author, content, session_id=1, msg_type="text", image="", is_push=False,
-                model="", thought_note="", attachment_name=""):
+                model="", thought_note="", attachment_name="", scene_mode=""):
     conn = get_db()
     cur = conn.execute(
         "INSERT INTO chat_messages "
-        "(session_id,author,content,msg_type,image,is_push,model,thought_note,attachment_name) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
+        "(session_id,author,content,msg_type,image,is_push,model,thought_note,attachment_name,scene_mode) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
         (session_id, author, content, msg_type, image, 1 if is_push else 0,
-         model or "", thought_note or "", attachment_name or ""))
+         model or "", thought_note or "", attachment_name or "", scene_mode or ""))
     conn.execute("UPDATE chat_sessions SET updated_at=datetime('now','+8 hours') WHERE id=?", (session_id,))
     conn.commit(); mid = cur.lastrowid; conn.close()
     return mid
@@ -745,10 +806,18 @@ def delete_treasure(tid):
     conn.execute("DELETE FROM treasures WHERE id=?", (tid,))
     conn.commit(); conn.close()
 
-def log_usage(model, it, ot, cost):
+def log_usage(model, it, ot, cost, requested_model="", returned_model="",
+              finish_reason="", cached_tokens=0, first_token_ms=0, total_ms=0,
+              quality_retry=0, http_status=0):
     conn = get_db()
-    conn.execute("INSERT INTO gateway_usage (model,input_tokens,output_tokens,cost_usd) VALUES (?,?,?,?)",
-                 (model, it, ot, cost))
+    conn.execute(
+        "INSERT INTO gateway_usage "
+        "(model,requested_model,returned_model,finish_reason,cached_tokens,first_token_ms,total_ms,"
+        "quality_retry,http_status,input_tokens,output_tokens,cost_usd) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (model, requested_model or model, returned_model or "", finish_reason or "",
+         int(cached_tokens or 0), int(first_token_ms or 0), int(total_ms or 0),
+         int(quality_retry or 0), int(http_status or 0), it, ot, cost))
     conn.commit(); conn.close()
 
 def add_push_subscription(sub_json):
@@ -1080,6 +1149,68 @@ def delete_moment(mid):
     conn.execute("DELETE FROM moment_comments WHERE moment_id=?", (mid,))
     conn.execute("DELETE FROM moments WHERE id=?", (mid,))
     conn.commit(); conn.close()
+
+
+def create_chat_job(job_id, session_id):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO chat_jobs (id,session_id,status) VALUES (?,?,'running')",
+        (job_id, session_id))
+    conn.commit(); conn.close()
+
+
+def add_chat_job_event(job_id, payload):
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO chat_job_events (job_id,payload) VALUES (?,?)", (job_id, payload))
+    conn.execute(
+        "UPDATE chat_jobs SET updated_at=datetime('now','+8 hours') WHERE id=?", (job_id,))
+    conn.commit(); seq = cur.lastrowid; conn.close()
+    return seq
+
+
+def chat_job_events(job_id, after_seq=0):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT seq,payload FROM chat_job_events WHERE job_id=? AND seq>? ORDER BY seq",
+        (job_id, int(after_seq or 0))).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def finish_chat_job(job_id, error=""):
+    conn = get_db()
+    conn.execute(
+        "UPDATE chat_jobs SET status=?,error=?,updated_at=datetime('now','+8 hours') WHERE id=?",
+        ("error" if error else "done", (error or "")[:500], job_id))
+    conn.commit(); conn.close()
+
+
+def detach_chat_job(job_id):
+    conn = get_db()
+    conn.execute(
+        "UPDATE chat_jobs SET detached=1,updated_at=datetime('now','+8 hours') WHERE id=?",
+        (job_id,))
+    conn.commit(); conn.close()
+
+
+def chat_job(job_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id,session_id,status,detached,error,updated_at FROM chat_jobs WHERE id=?",
+        (job_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def active_chat_jobs(session_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id,status,created_at,updated_at FROM chat_jobs "
+        "WHERE session_id=? AND status='running' ORDER BY created_at",
+        (session_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 def add_comment(moment_id, author, content, reply_due_at=None, reply_status="none"):
     """给某条动态加评论；动态不存在则不插入、返回 None。"""
@@ -1449,7 +1580,7 @@ def list_chat_sessions():
     """1对1 的会话列表（不含群聊），带最后活动时间，最近的在前。"""
     conn = get_db()
     rows = conn.execute(
-        "SELECT s.id, s.name, "
+        "SELECT s.id, s.name, s.bedroom_mode, "
         "(SELECT MAX(created_at) FROM chat_messages m WHERE m.session_id=s.id) AS last_at, "
         "(SELECT COUNT(*) FROM chat_messages m WHERE m.session_id=s.id) AS n "
         "FROM chat_sessions s WHERE s.id!=? "
@@ -1535,9 +1666,79 @@ def session_exists(sid):
 
 def get_session(sid=1):
     conn = get_db()
-    row = conn.execute("SELECT id,name,summary,summarized_until,summary_version FROM chat_sessions WHERE id=?", (sid,)).fetchone()
+    row = conn.execute(
+        "SELECT id,name,summary,summarized_until,summary_version,bedroom_mode,scene_started_after "
+        "FROM chat_sessions WHERE id=?", (sid,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def session_bedroom_state(sid=1):
+    """会话级亲密状态。换设备、刷新页面或主动推送都读取同一份服务器状态。"""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT bedroom_mode,scene_started_after FROM chat_sessions WHERE id=?", (sid,)
+    ).fetchone()
+    conn.close()
+    return {
+        "bedroom": bool(row and row["bedroom_mode"]),
+        "scene_started_after": int(row["scene_started_after"] or 0) if row else 0,
+    }
+
+
+def set_session_bedroom(sid, enabled):
+    """显式开/关场景；只有从日常进入时才重新划定场景起点。"""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT bedroom_mode FROM chat_sessions WHERE id=?", (sid,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None
+    enabled = bool(enabled)
+    if enabled and not bool(row["bedroom_mode"]):
+        last_id = conn.execute(
+            "SELECT COALESCE(MAX(id),0) AS id FROM chat_messages WHERE session_id=?", (sid,)
+        ).fetchone()["id"]
+        conn.execute(
+            "UPDATE chat_sessions SET bedroom_mode=1,scene_started_after=?,"
+            "updated_at=datetime('now','+8 hours') WHERE id=?", (last_id, sid)
+        )
+    elif not enabled:
+        conn.execute(
+            "UPDATE chat_sessions SET bedroom_mode=0,scene_started_after=0,"
+            "updated_at=datetime('now','+8 hours') WHERE id=?", (sid,)
+        )
+    conn.commit(); conn.close()
+    return session_bedroom_state(sid)
+
+
+def recent_scene_ledger(sid=1, limit=10, per_message=500, before_id=0):
+    """保留本轮场景最近原话，供连续性校验；不生成新摘要，也不写入永久记忆。"""
+    state = session_bedroom_state(sid)
+    if not state["bedroom"]:
+        return []
+    conn = get_db()
+    sql = (
+        "SELECT author,content FROM chat_messages "
+        "WHERE session_id=? AND id>? AND scene_mode='bedroom' "
+    )
+    params = [sid, state["scene_started_after"]]
+    if int(before_id or 0) > 0:
+        sql += "AND id<? "
+        params.append(int(before_id))
+    sql += "ORDER BY id DESC LIMIT ?"
+    params.append(int(limit))
+    rows = conn.execute(sql, tuple(params)).fetchall()
+    conn.close()
+    ledger = []
+    for row in reversed(rows):
+        content = " ".join((row["content"] or "").split())
+        if len(content) > per_message:
+            content = content[:per_message].rstrip() + "…"
+        if content:
+            ledger.append({"author": row["author"], "content": content})
+    return ledger
 
 def set_session_summary(sid, summary, summarized_until, summary_version=""):
     conn = get_db()
