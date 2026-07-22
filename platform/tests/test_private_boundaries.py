@@ -301,11 +301,12 @@ class AttachmentAndPrivateRegressionTests(unittest.TestCase):
                 json={"text": "只用于后台任务测试", "session_id": 1, "model": "fake"},
                 buffered=True,
             )
+            body = response.get_data(as_text=True)
         finally:
             chat_route.chat_ai.stream_chat = original
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("这是临时后台测试回复", response.get_data(as_text=True))
+        self.assertIn("这是临时后台测试回复", body)
         messages = self.db.recent_messages(1)
         self.assertEqual(messages[-1]["content"], "这是临时后台测试回复。")
         self.assertEqual(messages[-1]["thought_note"], "这是临时后台测试念头")
