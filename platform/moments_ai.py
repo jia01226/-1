@@ -50,7 +50,8 @@ def _soft_clip(text, limit=500):
 
 
 def _clean_visible(text, limit=500):
-    text = re.sub(r"\[image_desc\][\s\S]*?\[/image_desc\]", "", text or "", flags=re.I)
+    text = re.sub(r"^\s*<ke_note>[\s\S]{0,160}?</ke_note>\s*", "", text or "", flags=re.I)
+    text = re.sub(r"\[image_desc\][\s\S]*?\[/image_desc\]", "", text, flags=re.I)
     text = re.sub(r"```(?:json)?|```", "", text, flags=re.I)
     text = text.replace("|||", " ")
     text = re.sub(r"\s+", " ", text).strip()

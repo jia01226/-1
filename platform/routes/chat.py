@@ -22,6 +22,8 @@ _MOMENT_RE = re.compile(r"(?:^|\n|\|\|\|)[ \t]*\[朋友圈\][ \t]?([^\n|]+)")
 # 柯评论朋友圈暗号：[评论#动态id]正文——指定评论哪条动态（同样兼容 ||| 前缀）
 _COMMENT_RE = re.compile(r"(?:^|\n|\|\|\|)[ \t]*\[评论#(\d+)\][ \t]?([^\n|]+)")
 _DIARY_UNLOCK_RE = re.compile(r"\[解锁日记#(\d+)\]")
+_KE_NOTE_OPEN = "<ke_note>"
+_KE_NOTE_CLOSE = "</ke_note>"
 
 
 def _extract_moments(text):
@@ -84,6 +86,7 @@ def api_chat():
     if not text and not image:
         return jsonify({"error": "empty"}), 400
     sid = _chat_sid(data.get("session_id"))
+    db.set_active_chat_session(sid)
     bedroom = bool(data.get("bedroom"))                # 卧室模式（bedroom.py 只在服务器本地）
     if bedroom:
         logger.info("[bedroom] 前端的卧室开关已送达后端")
@@ -130,6 +133,9 @@ def api_chat():
         acc = ""
         assistant_message_id = None
         marker_hold = ""
+        note_hold = ""
+        note_waiting = True
+        public_note = ""
         unlocked_diary = []
         def _hide_unlock(match):
             did = int(match.group(1))
@@ -137,17 +143,17 @@ def api_chat():
                 if db.reveal_diary(did):
                     unlocked_diary.append(did)
             return ""
-        # 普通用户只看到简短、可理解的思考摘要；模型内部原始推理不会下发到前端。
+        # 先只回传消息 id。可展开的小念头必须来自本次同一个模型回复中的 <ke_note>，
+        # 后端拆出后单独下发；供应商原始隐藏推理永远不传。
         if image:
-            public_thought = "我先认真看看你发来的内容，再贴着你真正想说的来回答。"
+            fallback_note = "我先认真看完，再决定怎么接住你。"
         elif bedroom:
-            public_thought = "我想先贴近你此刻的感受，再慢慢把话说给你听。"
+            fallback_note = "这一刻的节奏，我来拿。"
         elif posts or mctx:
-            public_thought = "我想把你现在的话和我们已经记住的生活放在一起理解，再好好回答你。"
+            fallback_note = "我把眼前这句和我们的日子放在一起。"
         else:
-            public_thought = "我先听懂你真正想说的，再把回应说得自然一点。"
-        yield ("data: " + json.dumps({"think_summary": public_thought,
-                                       "user_message_id": user_message_id}, ensure_ascii=False) + "\n\n").encode("utf-8")
+            fallback_note = "我知道这一句该怎么接。"
+        yield ("data: " + json.dumps({"user_message_id": user_message_id}, ensure_ascii=False) + "\n\n").encode("utf-8")
         for piece in chat_ai.stream_chat(history, posts, model=model, bedroom=bedroom,
                                          api_base=gateway_base, api_key=gateway_key, sid=sid):
             if isinstance(piece, tuple):
@@ -158,6 +164,31 @@ def api_chat():
                 elif piece[0] == THINK_TAG:
                     pass  # 原始隐藏推理仅由模型内部使用，不传给普通用户界面。
                 continue
+            if note_waiting:
+                note_hold += piece
+                candidate = note_hold.lstrip()
+                if candidate.startswith(_KE_NOTE_OPEN):
+                    end = candidate.find(_KE_NOTE_CLOSE, len(_KE_NOTE_OPEN))
+                    if end < 0 and len(candidate) < 320:
+                        continue
+                    if end >= 0:
+                        public_note = candidate[len(_KE_NOTE_OPEN):end].strip()[:120]
+                        piece = candidate[end + len(_KE_NOTE_CLOSE):].lstrip("\r\n ")
+                    else:
+                        # 标签坏掉时也绝不把半截系统标记漏进聊天。
+                        piece = candidate.replace(_KE_NOTE_OPEN, "", 1).lstrip()
+                    note_waiting = False
+                    note_hold = ""
+                elif _KE_NOTE_OPEN.startswith(candidate) and len(candidate) < len(_KE_NOTE_OPEN):
+                    continue
+                else:
+                    # 模型偶尔不听格式：正文照常发，但仍给一条明确的可展开短念头。
+                    piece = note_hold
+                    note_hold = ""
+                    note_waiting = False
+                if not public_note:
+                    public_note = fallback_note
+                yield ("data: " + json.dumps({"think_summary": public_note}, ensure_ascii=False) + "\n\n").encode("utf-8")
             marker_hold += piece
             marker_hold = _DIARY_UNLOCK_RE.sub(_hide_unlock, marker_hold)
             # 暗号可能跨流式分片，末尾留一小段，确认不是暗号后再发给前端。
@@ -165,6 +196,16 @@ def api_chat():
                 visible, marker_hold = marker_hold[:-48], marker_hold[-48:]
                 acc += visible
                 yield ("data: " + json.dumps({"t": visible}, ensure_ascii=False) + "\n\n").encode("utf-8")
+        if note_waiting:
+            # 极短回复或模型只吐了半个标签时的安全收尾。
+            candidate = note_hold.lstrip()
+            if candidate.startswith(_KE_NOTE_OPEN):
+                candidate = candidate[len(_KE_NOTE_OPEN):].replace(_KE_NOTE_CLOSE, "", 1).strip()
+                public_note = candidate[:120] or fallback_note
+            else:
+                marker_hold += note_hold
+                public_note = fallback_note
+            yield ("data: " + json.dumps({"think_summary": public_note}, ensure_ascii=False) + "\n\n").encode("utf-8")
         marker_hold = _DIARY_UNLOCK_RE.sub(_hide_unlock, marker_hold)
         if marker_hold:
             acc += marker_hold
@@ -188,7 +229,9 @@ def api_chat():
                 except Exception as e:
                     logger.warning("柯评论朋友圈失败：%s", e)
             if clean_acc:
-                assistant_message_id = db.add_message("assistant", clean_acc, session_id=sid, model=model)
+                assistant_message_id = db.add_message(
+                    "assistant", clean_acc, session_id=sid, model=model,
+                    thought_note=public_note)
                 try:
                     relationship_state.observe("assistant", text=clean_acc, bedroom=bedroom)
                 except Exception as exc:
@@ -235,6 +278,15 @@ def api_sessions(): return jsonify(db.list_chat_sessions())
 def api_session_new():
     name = (jget("name") or DEFAULT_SESSION_NAME).strip()[:SESSION_NAME_MAXLEN] or DEFAULT_SESSION_NAME
     return jsonify({"id": db.create_chat_session(name), "name": name})
+
+
+@bp.post("/api/sessions/active")
+@guard
+def api_session_active():
+    """让服务器知道佳佳当前在哪条单聊，主动消息才能准确跟过去。"""
+    sid = _chat_sid(jget("id"))
+    ok = db.set_active_chat_session(sid)
+    return jsonify({"ok": ok, "id": sid})
 
 
 @bp.post("/api/sessions/rename")

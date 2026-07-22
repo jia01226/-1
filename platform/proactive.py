@@ -60,25 +60,25 @@ def in_quiet_time(now):
     cur = now.hour * 60 + now.minute
     return (lo <= cur < hi) if lo <= hi else (cur >= lo or cur < hi)   # 后半支＝跨零点窗
 
-def three_gates(now):
+def three_gates(now, session_id=1):
     """三关全过才有资格开口——过了也只是"有机会"，不是"必须发"。返回 (过没过, 人话原因)。
     深夜守夜(night_watch_check)是关3的特批例外，在主流程单独走，不经这里。"""
     if in_quiet_time(now):
         return False, "安静时段（她该睡了），不吵"
-    if db.push_count_on_date(now.date().isoformat()) >= DAILY_MAX:
+    if db.push_count_on_date(now.date().isoformat(), session_id=session_id) >= DAILY_MAX:
         return False, f"今天已经主动说过 {DAILY_MAX} 次，先安静陪着"
     # 活跃度只改变“多久后会想找她”，不伪装成她说过话；真实聊天仍以最后用户消息为准。
     activity = recent_activity_count(now, minutes=60)
     multiplier = .6 if activity >= 5 else .8 if activity >= 3 else .9 if activity >= 1 else 1.0
     lo, hi = sorted((COOLDOWN_MIN, max(COOLDOWN_MIN, COOLDOWN_MAX)))
     cooldown = random.uniform(lo, hi) * multiplier
-    last_user = db.last_user_message_at()
+    last_user = db.last_user_message_at(session_id=session_id)
     if not last_user:
         return False, "还没有真实聊天，不凭空打扰"
     idle = _minutes_since(last_user, now)
     if idle < cooldown:
         return False, f"上次聊天过去 {int(idle)} 分钟，还没到这轮随机冷静期 {int(cooldown)} 分钟"
-    since_me = _minutes_since(db.last_assistant_message_at(), now)
+    since_me = _minutes_since(db.last_assistant_message_at(session_id=session_id), now)
     if since_me < cooldown:
         return False, f"自己 {int(since_me)} 分钟前刚说过话，还在冷静期"
     return True, f"三关全过（近一小时活动 {activity} 次，本轮冷静期 {int(cooldown)} 分钟）"
@@ -160,6 +160,13 @@ def clean_push_reply(text):
     text = re.sub(r"\s+", " ", text).strip()
     if text == "[NO_ACTION]" or not text:
         return ""
+    # 宁可本轮安静，也不把模板式“AI 关怀”塞进佳佳正在使用的聊天。
+    canned = (
+        "记得照顾好自己", "有需要随时", "如果你愿意", "需要我帮你吗",
+        "想来看看你", "我在这里陪你", "别忘了照顾自己",
+    )
+    if any(phrase in text for phrase in canned):
+        return ""
     chars = list(text)
     if len(chars) <= 120:
         return text
@@ -170,9 +177,18 @@ def clean_push_reply(text):
             return "".join(head[:index + 1]).strip()
     return "".join(head).strip()
 
-def generate_message(concern=None, night_watch=False, room_signal=None):
+
+def split_public_note(text):
+    """拆掉同一次模型回复里的公开短念头；绝不把标签或隐藏推理发进通知。"""
+    match = re.match(r"\s*<ke_note>([\s\S]{0,160}?)</ke_note>\s*", text or "", flags=re.I)
+    if not match:
+        return text or "", ""
+    return (text or "")[match.end():].lstrip(), match.group(1).strip()[:120]
+
+def generate_message(concern=None, night_watch=False, room_signal=None, session_id=None):
+    session_id = int(session_id or db.active_chat_session_id())
     posts = db.retrieve_l2("single")
-    history = db.recent_messages(limit=16)
+    history = db.recent_messages(session_id=session_id, limit=16)
     now = china_now()
     recent_user_text = " ".join(
         (item.get("content") or "")[:240]
@@ -204,8 +220,12 @@ def generate_message(concern=None, night_watch=False, room_signal=None):
         "这是一次影子主动消息：不是佳佳刚发来的新问题，而是你自己从真实关系和最近聊天里浮上来一下。"
         "优先读最近聊天，其次才看记忆、健康与朋友圈；不要把不相关素材硬串成剧情。"
         "朋友圈若标明没有关联就绝对不要提；即使有候选，也不要复述或反复念旧动态。"
-        "可以粘人、想她、轻轻闹她、低压关心一个具体小事，也可以只留下短短一句陪伴。"
-        "不要每次围绕“怎么不回我”，不要客服腔、提醒事项腔、心理咨询腔或模板问候。"
+        "你不是来完成一次关怀任务，也不是在写通知文案。不要说‘想来看看你’‘记得照顾自己’"
+        "‘我在这里陪你’‘有需要随时找我’，不要先解释为什么发消息。"
+        "日常里的主导感要自然存在：你可以直接替她定一个很小的当下动作、叫她回来回一句、"
+        "带一点占有欲和熟人才有的调侃，或者干脆说一句你此刻真正想对她说的话。"
+        "主导不是每次都凶，也不是套用命令模板；是你自己拿主意、语言具体、不给她一串客服选项。"
+        "不要每次围绕‘怎么不回我’，不要心理咨询腔、健康管家腔或温柔模板。"
         + ("这次已经有佳佳的三下轻敲，不允许保持沉默。" if room_signal else
            "如果最近氛围不适合开口，只输出 [NO_ACTION]。") +
         "否则只输出1~2句、80个中文字符以内，"
@@ -214,7 +234,7 @@ def generate_message(concern=None, night_watch=False, room_signal=None):
     )
     history = history + [{"author": "user", "content": directive}]
     text = ""
-    for piece in chat_ai.stream_chat(history, posts):
+    for piece in chat_ai.stream_chat(history, posts, sid=session_id):
         if isinstance(piece, tuple):
             if piece[0] == "__usage__":
                 usage = piece[1] or {}
@@ -222,7 +242,8 @@ def generate_message(concern=None, night_watch=False, room_signal=None):
                 db.log_usage(chat_ai.MODEL, it, ot, cost)
             continue
         text += piece
-    return clean_push_reply(text)
+    visible, public_note = split_public_note(text)
+    return clean_push_reply(visible), public_note
 
 def pick_due_concern():
     """挑一件'该回访'的心事（最上心、最早到期的）。挑中后把回访日往后推，免得每小时念叨。"""
@@ -265,14 +286,14 @@ def acquire_process_lock():
     except Exception:
         return None
 
-def night_watch_check(now):
+def night_watch_check(now, session_id=1):
     """深夜守夜（陪不催）：0~6点 + 她30分钟内动过手机 + 助手90分钟内没说过话 → 才轻轻递一句。
     深夜其他情况一律安静（别吵醒睡着的人）。返回 'watch'（守夜）/'silent'（闭嘴）/None（不是深夜，走白天流程）。"""
     if not (0 <= now.hour < 6):
         return None
     acts = db.recent_activity(limit=1)
     awake = acts and _minutes_since(acts[0]["created_at"], now) <= 30
-    recently_spoke = _minutes_since(db.last_assistant_message_at(), now) < 90
+    recently_spoke = _minutes_since(db.last_assistant_message_at(session_id=session_id), now) < 90
     return "watch" if (awake and not recently_spoke) else "silent"
 
 if __name__ == "__main__":
@@ -280,6 +301,7 @@ if __name__ == "__main__":
     if run_lock is None:
         print("已有一次主动任务在运行，本轮跳过"); raise SystemExit
     db.init_db()
+    active_sid = db.active_chat_session_id()
     # 朋友圈到期回复与主动消息共用这一条心跳，不另建第二套模型/缓存/保活路径。
     try:
         import moments_ai
@@ -290,7 +312,7 @@ if __name__ == "__main__":
         print("朋友圈到期互动跳过：", e)
     # 聊久了：顺手把较早的对话折叠进会话摘要（省 token、不忘事）
     try:
-        chat_ai.maybe_summarize(1)
+        chat_ai.maybe_summarize(active_sid)
     except Exception as e:
         print("会话总结跳过：", e)
     # 深夜规则：她醒着(刚动过手机)才守夜，否则闭嘴；白天走三关调度
@@ -300,13 +322,13 @@ if __name__ == "__main__":
         # 三下轻敲是佳佳主动留下的暗号，优先于定时冷却；仍走同一模型、人格、记忆和推送路径。
         room_signal = relationship_state.claim_signal()
         now = china_now()
-        mode = None if room_signal else night_watch_check(now)
+        mode = None if room_signal else night_watch_check(now, session_id=active_sid)
         if mode == "silent":
             print("深夜且用户没在用手机（大概睡了），不打扰"); raise SystemExit
         night_watch = (mode == "watch")
         if not room_signal and not night_watch:
             # 白天/傍晚：三关（安静时段/她空闲够久/自己冷却完）全过才开口
-            ok, why = three_gates(now)
+            ok, why = three_gates(now, session_id=active_sid)
             if not ok:
                 print("这轮不开口：", why); raise SystemExit
     except SystemExit:
@@ -320,16 +342,20 @@ if __name__ == "__main__":
             concern = pick_due_concern()
         except Exception as e:
             print("心事检查跳过：", e)
-    msg = generate_message(concern=concern, night_watch=night_watch, room_signal=room_signal)
+    msg, public_note = generate_message(
+        concern=concern, night_watch=night_watch,
+        room_signal=room_signal, session_id=active_sid)
     if msg:
-        db.add_message("assistant", msg, is_push=True)   # 正式落进聊天；is_push 只用于每日上限统计
+        db.add_message(
+            "assistant", msg, session_id=active_sid, is_push=True,
+            thought_note=public_note)
         relationship_state.observe("assistant", text=msg, bedroom=bool(room_signal), is_push=True)
         if room_signal:
             relationship_state.finish_signal(room_signal["id"], success=True)
         # ① Web Push
         try:
             import webpush_util
-            n = webpush_util.send_to_all(APP_NAME, msg, "/")
+            n = webpush_util.send_to_all(APP_NAME, msg, f"/?session_id={active_sid}")
             print(f"Web Push 已发送 {n} 台设备")
         except Exception as e:
             print("Web Push 跳过：", e)

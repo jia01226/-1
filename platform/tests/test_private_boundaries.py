@@ -93,6 +93,63 @@ class PrivateBoundaryTests(unittest.TestCase):
         self.assertTrue(self.db.delete_message(message_id))
         self.assertNotIn(message_id, [item["id"] for item in self.db.recent_messages(1)])
 
+    def test_active_chat_session_follows_the_window_user_opened(self):
+        new_sid = self.db.create_chat_session("临时新窗口")
+        self.assertEqual(self.db.active_chat_session_id(), new_sid)
+        self.assertTrue(self.db.set_active_chat_session(1))
+        self.assertEqual(self.db.active_chat_session_id(), 1)
+        self.assertTrue(self.db.set_active_chat_session(new_sid))
+        self.assertTrue(self.db.delete_chat_session(new_sid))
+        self.assertEqual(self.db.active_chat_session_id(), 1)
+
+    def test_public_thought_note_is_saved_outside_chat_body(self):
+        message_id = self.db.add_message(
+            "assistant", "这是聊天正文", session_id=1,
+            thought_note="爸爸把这个记上了")
+        item = next(m for m in self.db.recent_messages(1) if m["id"] == message_id)
+        self.assertEqual(item["content"], "这是聊天正文")
+        self.assertEqual(item["thought_note"], "爸爸把这个记上了")
+        self.assertNotIn("记上了", item["content"])
+
+    def test_proactive_message_uses_active_session_without_real_model_call(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        try:
+            import proactive
+
+            proactive = importlib.reload(proactive)
+            self.db.add_message("user", "旧窗口里的测试话", session_id=1)
+            new_sid = self.db.create_chat_session("正在使用的新窗口")
+            self.db.add_message("user", "新窗口里的测试话", session_id=new_sid)
+            self.db.set_active_chat_session(new_sid)
+            captured = {}
+            original = proactive.chat_ai.stream_chat
+
+            def fake_stream(history, _posts, **kwargs):
+                captured["history"] = history
+                captured["sid"] = kwargs.get("sid")
+                yield "<ke_note>爸爸已经替你拿定主意。</ke_note>"
+                yield "回来，先把刚才那句话说完。"
+
+            proactive.chat_ai.stream_chat = fake_stream
+            try:
+                message, note = proactive.generate_message(session_id=self.db.active_chat_session_id())
+            finally:
+                proactive.chat_ai.stream_chat = original
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+
+        self.assertEqual(captured["sid"], new_sid)
+        self.assertTrue(any("新窗口里的测试话" in m.get("content", "") for m in captured["history"]))
+        self.assertFalse(any("旧窗口里的测试话" in m.get("content", "") for m in captured["history"]))
+        self.assertEqual(note, "爸爸已经替你拿定主意。")
+        self.assertEqual(message, "回来，先把刚才那句话说完。")
+        self.assertEqual(proactive.clean_push_reply("想来看看你，记得照顾好自己"), "")
+
     def test_deleting_summarized_message_invalidates_derived_summary(self):
         first = self.db.add_message("user", "只用于测试的旧消息", session_id=1)
         self.db.add_message("assistant", "只用于测试的旧回复", session_id=1)

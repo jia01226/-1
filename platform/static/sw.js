@@ -2,7 +2,7 @@
 self.addEventListener("install", e => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 
-const UI_SCRIPT = '<script src="/static/ui-redesign.js?v=20260722h" defer></script>';
+const UI_SCRIPT = '<script src="/static/ui-redesign.js?v=20260722i" defer></script>';
 
 self.addEventListener("fetch", event => {
   const req = event.request;
@@ -36,23 +36,32 @@ self.addEventListener("push", event => {
   let d = { title: "AI 助手", body: "", url: "/" };
   try { if (event.data) d = Object.assign(d, event.data.json()); } catch (_) {}
   event.waitUntil(
-    self.registration.showNotification(d.title || "AI 助手", {
-      body: d.body || "",
-      icon: "/static/icon-192.png",
-      badge: "/static/icon-192.png",
-      data: { url: d.url || "/" },
-      vibrate: [80, 40, 80]
-    })
+    Promise.all([
+      self.registration.showNotification(d.title || "AI 助手", {
+        body: d.body || "",
+        icon: "/static/icon-192.png",
+        badge: "/static/icon-192.png",
+        data: { url: d.url || "/" },
+        vibrate: [80, 40, 80]
+      }),
+      clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+        list.forEach(client => client.postMessage({ type: "GOODLOVE_PUSH", url: d.url || "/" }));
+      })
+    ])
   );
 });
 
 self.addEventListener("notificationclick", event => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || "/";
+  const target = new URL(url, self.location.origin).href;
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
-      for (const c of list) { if ("focus" in c) return c.focus(); }
-      if (clients.openWindow) return clients.openWindow(url);
+      const exact = list.find(c => c.url === target);
+      if (exact && "focus" in exact) return exact.focus();
+      const current = list[0];
+      if (current && "navigate" in current) return current.navigate(target).then(c => c && c.focus());
+      if (clients.openWindow) return clients.openWindow(target);
     })
   );
 });

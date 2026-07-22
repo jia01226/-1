@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     msg_type TEXT DEFAULT 'text',
     is_push INTEGER DEFAULT 0,     -- 影子推送=1；仍是正式聊天消息，只用于每日上限统计
     model TEXT DEFAULT '',         -- 生成这条消息时实际选择的模型（只做归因，不参与人格判断）
+    thought_note TEXT DEFAULT '',  -- 柯主动给佳佳看的短念头；不是供应商隐藏推理
     created_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
@@ -197,6 +198,13 @@ CREATE TABLE IF NOT EXISTS moments (
     updated_at DATETIME DEFAULT (datetime('now','+8 hours'))
 );
 
+-- 当前真正打开的 1 对 1 会话。主动消息必须跟到这里，不能永远写死旧主会话。
+CREATE TABLE IF NOT EXISTS chat_runtime_state (
+    id INTEGER PRIMARY KEY CHECK (id=1),
+    active_session_id INTEGER DEFAULT 1,
+    updated_at DATETIME DEFAULT (datetime('now','+8 hours'))
+);
+
 -- 柯的状态层：数值只在服务器驱动语气，普通 UI 只显示自然语言描述。
 CREATE TABLE IF NOT EXISTS companion_state (
     id INTEGER PRIMARY KEY CHECK (id=1),
@@ -329,6 +337,8 @@ def init_db():
         conn.execute("ALTER TABLE chat_messages ADD COLUMN is_push INTEGER DEFAULT 0")
     if "model" not in mcols:
         conn.execute("ALTER TABLE chat_messages ADD COLUMN model TEXT DEFAULT ''")
+    if "thought_note" not in mcols:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN thought_note TEXT DEFAULT ''")
     # 旧库平滑升级：会话表补 summarized_until（会话总结用：已折叠到摘要的最大消息 id）
     scols = [r["name"] for r in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
     if "summarized_until" not in scols:
@@ -387,17 +397,23 @@ def init_db():
     conn.close()
 
 # ---- 便捷读写 ----
-def add_message(author, content, session_id=1, msg_type="text", image="", is_push=False, model=""):
+def add_message(author, content, session_id=1, msg_type="text", image="", is_push=False,
+                model="", thought_note=""):
     conn = get_db()
-    cur = conn.execute("INSERT INTO chat_messages (session_id,author,content,msg_type,image,is_push,model) VALUES (?,?,?,?,?,?,?)",
-                       (session_id, author, content, msg_type, image, 1 if is_push else 0, model or ""))
+    cur = conn.execute(
+        "INSERT INTO chat_messages "
+        "(session_id,author,content,msg_type,image,is_push,model,thought_note) VALUES (?,?,?,?,?,?,?,?)",
+        (session_id, author, content, msg_type, image, 1 if is_push else 0,
+         model or "", thought_note or ""))
+    conn.execute("UPDATE chat_sessions SET updated_at=datetime('now','+8 hours') WHERE id=?", (session_id,))
     conn.commit(); mid = cur.lastrowid; conn.close()
     return mid
 
 def recent_messages(session_id=1, limit=40):
     conn = get_db()
     rows = conn.execute(
-        "SELECT id,author,content,created_at,image,model FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
+        "SELECT id,author,content,created_at,image,model,thought_note "
+        "FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
         (session_id, limit)).fetchall()
     conn.close()
     return [dict(r) for r in reversed(rows)]
@@ -1440,7 +1456,53 @@ def list_chat_sessions():
 def create_chat_session(name="新对话"):
     conn = get_db()
     cur = conn.execute("INSERT INTO chat_sessions (name) VALUES (?)", (name,))
-    conn.commit(); sid = cur.lastrowid; conn.close()
+    sid = cur.lastrowid
+    conn.execute(
+        "INSERT INTO chat_runtime_state (id,active_session_id) VALUES (1,?) "
+        "ON CONFLICT(id) DO UPDATE SET active_session_id=excluded.active_session_id,"
+        "updated_at=datetime('now','+8 hours')", (sid,))
+    conn.commit(); conn.close()
+    return sid
+
+
+def set_active_chat_session(sid):
+    """记录佳佳此刻真正打开的单聊；非法、群聊或已删除会话不接受。"""
+    try:
+        sid = int(sid)
+    except (TypeError, ValueError):
+        return False
+    conn = get_db()
+    valid = conn.execute(
+        "SELECT 1 FROM chat_sessions WHERE id=? AND id!=?", (sid, GROUP_SID)
+    ).fetchone()
+    if not valid:
+        conn.close()
+        return False
+    conn.execute(
+        "INSERT INTO chat_runtime_state (id,active_session_id) VALUES (1,?) "
+        "ON CONFLICT(id) DO UPDATE SET active_session_id=excluded.active_session_id,"
+        "updated_at=datetime('now','+8 hours')", (sid,))
+    conn.commit(); conn.close()
+    return True
+
+
+def active_chat_session_id():
+    """返回最近由 PWA 明确打开的单聊；没有记录时退回最近有活动的单聊。"""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT r.active_session_id FROM chat_runtime_state r "
+        "JOIN chat_sessions s ON s.id=r.active_session_id "
+        "WHERE r.id=1 AND s.id!=?", (GROUP_SID,)
+    ).fetchone()
+    if row:
+        sid = int(row["active_session_id"])
+    else:
+        fallback = conn.execute(
+            "SELECT s.id FROM chat_sessions s WHERE s.id!=? "
+            "ORDER BY s.updated_at DESC,s.id DESC LIMIT 1", (GROUP_SID,)
+        ).fetchone()
+        sid = int(fallback["id"]) if fallback else 1
+    conn.close()
     return sid
 
 def rename_chat_session(sid, name):
@@ -1455,6 +1517,9 @@ def delete_chat_session(sid):
     conn = get_db()
     conn.execute("DELETE FROM chat_messages WHERE session_id=?", (sid,))
     conn.execute("DELETE FROM chat_sessions WHERE id=?", (sid,))
+    conn.execute(
+        "UPDATE chat_runtime_state SET active_session_id=1,updated_at=datetime('now','+8 hours') "
+        "WHERE id=1 AND active_session_id=?", (sid,))
     conn.commit(); conn.close()
     return True
 

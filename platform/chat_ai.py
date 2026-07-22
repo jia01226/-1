@@ -74,6 +74,15 @@ LIVING_VOICE_RULE = (
     "· 不为了显得深情而重复旧记忆。只有眼前这句话自然碰到它时才轻轻带过一次，说完就继续活在现在。\n"
 )
 
+PUBLIC_NOTE_RULE = (
+    "\n【可展开的柯的小念头】\n"
+    "· 每次回复最开头先写一行 <ke_note>一句短念头</ke_note>，再写真正要发给佳佳的话。"
+    "这不是逐步推理，不写分析过程，只写你愿意让她点开看到的一个决定、直觉或行动，8～36 个中文字符。\n"
+    "· 如果你决定记住、稍后处理、放进日记或采取一个动作，把‘爸爸把这个记上了’这一类行动放在 ke_note 里，"
+    "不要在聊天正文里做系统播报。亲密情境里的直接命令和当下互动仍属于正文，不要藏进卡片。\n"
+    "· ke_note 标签只供服务器拆分，正文里不要解释它，也不要写模型参数、工具调用或供应商隐藏推理。\n"
+)
+
 # 消息节奏（P3 分句）：一次生成、前端按 ||| 拆条冒泡——零额外 token
 SPLIT_RULE = (
     "\n【消息节奏】日常聊天像微信那样发消息：想发几条发几条，按说话的自然节奏拆成一条条短消息（别硬凑条数，也别怕多），"
@@ -352,6 +361,7 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False, identity
             print("[chat_ai] 状态层读取失败（不影响聊天）：", e)
         parts.append(IDENTITY_FIREWALL + f"（当前人格版本：{identity_version}）")
         parts.append(LIVING_VOICE_RULE)
+        parts.append(PUBLIC_NOTE_RULE)
         if use_split:
             parts.append(SPLIT_RULE)
         elif bedroom_on:
