@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#FBF8F1" />
 <link rel="manifest" href="/static/manifest.webmanifest" />
 <link rel="apple-touch-icon" href="/static/icon.png" />
-<script src="/static/ui-redesign.js?v=20260722a" defer></script>
+<script src="/static/ui-redesign.js?v=20260722b" defer></script>
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AI 助手" />
@@ -322,6 +322,16 @@ function bubble(role,text,time,image,mid){const w=document.createElement("div");
   if(role==="user"){w.appendChild(bb);w.appendChild(tag);}else{w.appendChild(tag);w.appendChild(bb);}
   msgs.appendChild(w);scroll();bb._tag=tag;bb._who=who;bb._tx=tx;if(mid)bindLongPress(bb,mid,role);return bb;}
 function setBubbleTime(bb,t){if(bb&&bb._tag)bb._tag.textContent=bb._who+" · "+t;}
+function attachThinkingSummary(bb,steps){if(!bb||bb._thinkingRow)return;
+  const items=(Array.isArray(steps)?steps:[steps]).map(x=>String(x||"").trim()).filter(Boolean).slice(0,4);if(!items.length)return;
+  const row=document.createElement("div");row.className="thinking-row";
+  const card=document.createElement("details");card.className="thinking-card";
+  const title=document.createElement("summary");title.textContent="柯在想";
+  const body=document.createElement("div");body.className="thinking-body";
+  items.forEach(step=>{const p=document.createElement("p");p.textContent=step;body.appendChild(p);});
+  card.appendChild(title);card.appendChild(body);row.appendChild(card);bb.parentElement.before(row);
+  bb._thinkingRow=row;bb._thinkingCard=card;
+}
 // 长按(手机)/右键(电脑)弹菜单：普通界面只说人话，不露记忆检索字段。
 function bindLongPress(el,mid,role){let tm=null;const cancel=()=>{if(tm)clearTimeout(tm);tm=null;};
   el.addEventListener("touchstart",()=>{tm=setTimeout(()=>{cancel();showMsgMenu(el,mid,role);},600);},{passive:true});
@@ -448,7 +458,7 @@ async function send(){const t=$("#input").value.trim();const img=pending?pending
     parts.forEach((p,i)=>{let s=p;if(i===parts.length-1)s=s.replace(/\|+\s*$/,"");bubbles[i]._tx.textContent=s.trim();});scroll();}
   const r=await api("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t,image:img,session_id:currentSid,bedroom:BD,model:selectedModel||undefined})});
   const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
-  while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf("\n\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith("data:"))continue;try{const e=JSON.parse(line.slice(5).trim());if(e.think){b.classList.remove("typing");if(!b._th){const d=document.createElement("details");d.style.cssText="margin-bottom:6px;font-size:12.5px;color:var(--soft)";d.innerHTML='<summary style="cursor:pointer">💭 想了想…</summary>';const p=document.createElement("div");p.style.cssText="white-space:pre-wrap;margin-top:4px";d.appendChild(p);b.prepend(d);b._th=p;}b._th.textContent+=e.think;scroll();}if(e.t){acc+=e.t;b.classList.remove("typing");paint();}}catch(_){}}}
+  while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf("\n\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith("data:"))continue;try{const e=JSON.parse(line.slice(5).trim());if(e.think_summary){attachThinkingSummary(b,e.think_summary);scroll();}if(e.t){acc+=e.t;b.classList.remove("typing");paint();}}catch(_){}}}
   b.classList.remove("typing");
   if(!acc){b._tx.textContent="（没有回应，再试一次~）";return;}
   while(bubbles.length>1&&!bubbles[bubbles.length-1]._tx.textContent){bubbles.pop().parentElement.remove();}

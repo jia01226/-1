@@ -87,6 +87,7 @@ def api_chat():
     db.add_message("user", text, session_id=sid, image=image, msg_type=("image" if image else "text"))
     history = db.recent_messages(session_id=sid)
     posts = db.retrieve_l2("single")   # 单聊记忆：active 的 L2 卡，已排除 no_model/已忘/已归档/repo-only
+    mctx = ""
     # 让柯"看见"朋友圈：把近况拼到最后一条用户消息末尾（只发给模型、不入库、前端不显示）
     if history and sid == MAIN_SESSION:
         mctx = _moments_context()
@@ -98,6 +99,16 @@ def api_chat():
 
     def gen():
         acc = ""
+        # 普通用户只看到简短、可理解的思考摘要；模型内部原始推理不会下发到前端。
+        if image:
+            public_thought = "我先认真看看你发来的内容，再贴着你真正想说的来回答。"
+        elif bedroom:
+            public_thought = "我想先贴近你此刻的感受，再慢慢把话说给你听。"
+        elif posts or mctx:
+            public_thought = "我想把你现在的话和我们已经记住的生活放在一起理解，再好好回答你。"
+        else:
+            public_thought = "我先听懂你真正想说的，再把回应说得自然一点。"
+        yield ("data: " + json.dumps({"think_summary": public_thought}, ensure_ascii=False) + "\n\n").encode("utf-8")
         for piece in chat_ai.stream_chat(history, posts, model=model, bedroom=bedroom,
                                          api_base=gateway_base, api_key=gateway_key):
             if isinstance(piece, tuple):
@@ -106,7 +117,7 @@ def api_chat():
                     cost, it, ot = chat_ai.estimate_cost(model, usage)
                     db.log_usage(model, it, ot, cost)
                 elif piece[0] == THINK_TAG:
-                    yield ("data: " + json.dumps({"think": piece[1]}, ensure_ascii=False) + "\n\n").encode("utf-8")
+                    pass  # 原始隐藏推理仅由模型内部使用，不传给普通用户界面。
                 continue
             acc += piece
             yield ("data: " + json.dumps({"t": piece}, ensure_ascii=False) + "\n\n").encode("utf-8")

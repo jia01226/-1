@@ -65,10 +65,25 @@
       .gl-home .quick-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:20px}
       .gl-home .quick-row button,.gl-home .memory-tab,.gl-home .soft-action{min-height:48px;border:0;background:var(--glass2);color:var(--ink);border-radius:14px;padding:10px 14px;font:inherit;font-size:13px;font-weight:400;transition:transform .18s ease,background .22s ease,box-shadow .22s ease}
       .gl-home button:active,.gl-home a:active{transform:translateY(1px);opacity:.82}
-      .gl-home .bubble{padding:12px 16px;box-shadow:0 4px 18px rgba(54,37,42,.035);border-color:var(--line);backdrop-filter:none;-webkit-backdrop-filter:none}
+      .gl-home .msg{width:100%;display:flex;flex-direction:column;align-items:flex-start;margin:14px 0}
+      .gl-home .msg.me{align-items:flex-end;justify-content:flex-start}
+      .gl-home .msg.gude{align-items:flex-start}
+      .gl-home .msg .bubble{order:1;max-width:min(82%,560px);padding:12px 16px;box-shadow:0 4px 18px rgba(54,37,42,.035);border-color:var(--line);backdrop-filter:none;-webkit-backdrop-filter:none}
+      .gl-home .msg .tag{order:2;display:block;min-height:14px;margin:5px 8px 0;white-space:nowrap;line-height:1.35;text-align:left}
+      .gl-home .msg.me .tag{text-align:right}
       .gl-home .me .bubble{background:var(--me);color:#493b3e}
       .gl-home .gude .bubble{background:var(--glass)}
-      .gl-home .msg.me+.msg.me .tag,.gl-home .msg.gude+.msg.gude .tag{visibility:hidden;height:0;margin:0;overflow:hidden}
+      .gl-home .msg.me+.msg.me .tag,.gl-home .msg.gude+.msg.gude .tag{display:none}
+      .gl-home .thinking-row{display:flex;justify-content:flex-start;width:100%;margin:7px 0 10px}
+      .gl-home .thinking-card{width:min(82%,520px);overflow:hidden;border:1px solid rgba(196,170,137,.5);border-radius:16px;background:rgba(255,252,247,.92);color:var(--soft);box-shadow:0 7px 24px rgba(54,37,42,.035)}
+      .gl-home .thinking-card summary{display:flex;align-items:center;min-height:48px;padding:0 15px;list-style:none;cursor:pointer;color:#9c7d55;font-size:13px;letter-spacing:.02em;-webkit-tap-highlight-color:transparent}
+      .gl-home .thinking-card summary::-webkit-details-marker{display:none}
+      .gl-home .thinking-card summary::before{content:"💡";margin-right:9px;font-size:14px;filter:saturate(.55)}
+      .gl-home .thinking-card summary::after{content:"›";margin-left:auto;font-size:19px;line-height:1;transition:transform .2s ease}
+      .gl-home .thinking-card[open] summary::after{transform:rotate(90deg)}
+      .gl-home .thinking-body{padding:0 16px 14px 39px;border-top:1px solid rgba(196,170,137,.18);color:var(--soft);font-size:12.5px;line-height:1.75}
+      .gl-home .thinking-body p{position:relative;margin:10px 0 0}
+      .gl-home .thinking-body p::before{content:"";position:absolute;left:-15px;top:.72em;width:4px;height:4px;border-radius:50%;background:var(--gold)}
       .gl-home footer{background:rgba(250,248,245,.94);border-color:var(--line);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
       .gl-home textarea,.gl-home input,.gl-home select{background:var(--glass);border-color:var(--line);border-radius:11px}
       .gl-home .send{box-shadow:0 7px 20px rgba(170,116,125,.18);background:var(--wine)}
@@ -220,12 +235,19 @@
 
   function modelLabel(model, isDefault) {
     const raw = String(model || "");
-    const id = raw.split("/").pop().toLowerCase();
-    let short = raw.split("/").pop().replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-    if (id.includes("opus")) short = "Claude Opus · 深度";
-    else if (id.includes("sonnet")) short = "Claude Sonnet · 均衡";
-    else if (id.includes("haiku")) short = "Claude Haiku · 快速";
-    else if (id.startsWith("gpt")) short = `${id.replace(/^gpt[-_]?/, "GPT ").replace(/[-_]/g, " ")} · 第二个大脑`;
+    const slug = raw.split("/").pop();
+    const id = slug.toLowerCase();
+    let short = slug.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+    const claude = id.match(/^claude[-_](opus|sonnet|haiku|fable)[-_](\d+(?:[._-]\d+)?)(.*)$/);
+    if (claude) {
+      const family = claude[1][0].toUpperCase() + claude[1].slice(1);
+      const version = claude[2].replace(/[_-]/g, ".");
+      const suffix = claude[3].replace(/^[-_]+/, "").replace(/[-_]/g, " ");
+      short = `Claude ${family} ${version}${suffix ? ` ${suffix}` : ""}`;
+    } else if (id.startsWith("gpt")) {
+      const gpt = id.replace(/^gpt[-_]?/, "").replace(/[-_]/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+      short = `GPT ${gpt}`.trim();
+    }
     return `${short || "默认模型"}${isDefault ? " · 默认" : ""}`;
   }
 

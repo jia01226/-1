@@ -1,0 +1,11 @@
+[Unit]
+Description=Goodlove PWA automatic deployment from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/-1/platform
+ExecStart=/root/-1/platform/auto_deploy.sh
+
