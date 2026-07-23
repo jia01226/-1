@@ -430,7 +430,7 @@ def api_chat():
 @bp.get("/api/models")
 @guard
 def api_models():
-    """给 PWA 模型选择器：允许的模型、默认模型和 Claude/GPT 分组。"""
+    """给 PWA 模型选择器：允许的模型、默认模型和各独立通道分组。"""
     return jsonify(chat_ai.available_models())
 
 

@@ -173,6 +173,16 @@ GPT_MODEL_WHITELIST = [s.strip() for s in os.environ.get(
 ).split(",") if s.strip()]
 GPT_ENABLED = bool(GPT_API_BASE and GPT_API_KEY)
 
+# 第三个大脑：DeepSeek 官方通道。独立密钥、独立白名单，不经过现有中转。
+# V4 官方型号是 deepseek-v4-pro / deepseek-v4-flash；旧 chat/reasoner 名称不再接入。
+DEEPSEEK_API_BASE = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro").strip()
+DEEPSEEK_MODEL_WHITELIST = [s.strip() for s in os.environ.get(
+    "DEEPSEEK_MODEL_WHITELIST", "deepseek-v4-pro,deepseek-v4-flash"
+).split(",") if s.strip()]
+DEEPSEEK_ENABLED = bool(DEEPSEEK_API_BASE and DEEPSEEK_API_KEY)
+
 def resolve_model(req):
     """前端请求的模型：在白名单里才认，否则用默认 MODEL。"""
     req = (req or "").strip()
@@ -181,14 +191,16 @@ def resolve_model(req):
     return MODEL
 
 def resolve_gateway(req):
-    """返回本轮模型和对应通道；未启用或名单外的 GPT 请求安全回落默认通道。"""
+    """返回本轮模型和对应通道；未启用或名单外的第三方请求安全回落默认通道。"""
     req = (req or "").strip()
+    if DEEPSEEK_ENABLED and req in DEEPSEEK_MODEL_WHITELIST:
+        return req, DEEPSEEK_API_BASE, DEEPSEEK_API_KEY
     if GPT_ENABLED and req in GPT_MODEL_WHITELIST:
         return req, GPT_API_BASE, GPT_API_KEY
     return resolve_model(req), None, None
 
 def available_models():
-    """PWA 模型选择器数据：Claude 始终存在，GPT 仅在服务器配置完成后出现。"""
+    """PWA 模型选择器数据：独立通道只有在服务器配置完整后才出现。"""
     models = []
     options = []
     for model in [MODEL, *MODEL_WHITELIST]:
@@ -200,8 +212,13 @@ def available_models():
             if model and model not in models:
                 models.append(model)
                 options.append({"id": model, "provider": "gpt"})
+    if DEEPSEEK_ENABLED:
+        for model in [DEEPSEEK_MODEL, *DEEPSEEK_MODEL_WHITELIST]:
+            if model and model not in models:
+                models.append(model)
+                options.append({"id": model, "provider": "deepseek"})
     return {"models": models, "default": MODEL, "options": options,
-            "gpt_enabled": GPT_ENABLED}
+            "gpt_enabled": GPT_ENABLED, "deepseek_enabled": DEEPSEEK_ENABLED}
 
 def _load_soul():
     """从私有 kongkong 仓库读角色的魂（柯.md/profile/语气样本/memory），按序拼接。
@@ -804,6 +821,16 @@ def estimate_cost(model, usage):
     """粗略估算（OpenRouter 实际计费以账单为准）。返回美元。"""
     it = usage.get("prompt_tokens", 0) or 0
     ot = usage.get("completion_tokens", 0) or 0
+    cached = min(it, usage.get("cached_tokens", 0) or 0)
+    uncached = max(0, it - cached)
+    if model == "deepseek-v4-pro":
+        # 官方 2026-04 V4 美元价：缓存命中/未命中输入 $0.003625/$0.435，输出 $0.87 / 1M。
+        cost = cached / 1e6 * 0.003625 + uncached / 1e6 * 0.435 + ot / 1e6 * 0.87
+        return round(cost, 6), it, ot
+    if model == "deepseek-v4-flash":
+        # 官方 2026-04 V4 美元价：缓存命中/未命中输入 $0.0028/$0.14，输出 $0.28 / 1M。
+        cost = cached / 1e6 * 0.0028 + uncached / 1e6 * 0.14 + ot / 1e6 * 0.28
+        return round(cost, 6), it, ot
     # 默认按 Sonnet 量级估：$3/M 入、$15/M 出
     return round(it/1e6*3 + ot/1e6*15, 6), it, ot
 

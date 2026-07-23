@@ -689,5 +689,74 @@ class IntimatePromptContractTests(unittest.TestCase):
         self.assertIn("亲口汇报", visible)
 
 
+class ModelGatewayRoutingTests(unittest.TestCase):
+    """只用假地址和假密钥验证模型路由，不发送任何网络请求。"""
+
+    def test_deepseek_v4_uses_its_own_official_channel(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        try:
+            import chat_ai
+            original = (
+                chat_ai.DEEPSEEK_ENABLED,
+                chat_ai.DEEPSEEK_API_BASE,
+                chat_ai.DEEPSEEK_API_KEY,
+                chat_ai.DEEPSEEK_MODEL,
+                chat_ai.DEEPSEEK_MODEL_WHITELIST,
+            )
+            chat_ai.DEEPSEEK_ENABLED = True
+            chat_ai.DEEPSEEK_API_BASE = "https://api.deepseek.invalid"
+            chat_ai.DEEPSEEK_API_KEY = "temporary-deepseek-key"
+            chat_ai.DEEPSEEK_MODEL = "deepseek-v4-pro"
+            chat_ai.DEEPSEEK_MODEL_WHITELIST = ["deepseek-v4-pro", "deepseek-v4-flash"]
+            try:
+                self.assertEqual(
+                    chat_ai.resolve_gateway("deepseek-v4-pro"),
+                    ("deepseek-v4-pro", "https://api.deepseek.invalid", "temporary-deepseek-key"),
+                )
+                payload = chat_ai.available_models()
+            finally:
+                (
+                    chat_ai.DEEPSEEK_ENABLED,
+                    chat_ai.DEEPSEEK_API_BASE,
+                    chat_ai.DEEPSEEK_API_KEY,
+                    chat_ai.DEEPSEEK_MODEL,
+                    chat_ai.DEEPSEEK_MODEL_WHITELIST,
+                ) = original
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+
+        self.assertTrue(payload["deepseek_enabled"])
+        self.assertIn({"id": "deepseek-v4-pro", "provider": "deepseek"}, payload["options"])
+        self.assertIn({"id": "deepseek-v4-flash", "provider": "deepseek"}, payload["options"])
+        self.assertNotIn("temporary-deepseek-key", repr(payload))
+
+    def test_deepseek_cost_estimate_uses_official_v4_rates(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        try:
+            import chat_ai
+            pro, _, _ = chat_ai.estimate_cost(
+                "deepseek-v4-pro",
+                {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000, "cached_tokens": 0},
+            )
+            flash, _, _ = chat_ai.estimate_cost(
+                "deepseek-v4-flash",
+                {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000, "cached_tokens": 0},
+            )
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+        self.assertEqual(pro, 1.305)
+        self.assertEqual(flash, 0.42)
+
+
 if __name__ == "__main__":
     unittest.main()

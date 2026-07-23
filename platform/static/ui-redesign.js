@@ -202,15 +202,17 @@
     const fillModels = (models, defaultModel = "", options = []) => {
       const allowed = Array.from(new Set([defaultModel, ...models].filter(Boolean)));
       const providers = new Map(options.map((option) => [option.id, option.provider]));
-      const groups = { claude: [], gpt: [], other: [] };
+      const groups = { claude: [], gpt: [], deepseek: [], other: [] };
       allowed.forEach((model) => {
-        const provider = providers.get(model) || (String(model).toLowerCase().includes("gpt") ? "gpt" : "claude");
+        const lower = String(model).toLowerCase();
+        const provider = providers.get(model) || (lower.includes("deepseek") ? "deepseek" : (lower.includes("gpt") ? "gpt" : "claude"));
         (groups[provider] || groups.other).push(model);
       });
       const optionHtml = (model) => `<option value="${escapeHtml(model)}" title="${escapeHtml(model)}">${escapeHtml(modelLabel(model, model === defaultModel))}</option>`;
       picker.innerHTML = [
         groups.claude.length ? `<optgroup label="Claude · 柯">${groups.claude.map(optionHtml).join("")}</optgroup>` : "",
         groups.gpt.length ? `<optgroup label="GPT · 柯">${groups.gpt.map(optionHtml).join("")}</optgroup>` : "",
+        groups.deepseek.length ? `<optgroup label="DeepSeek · 柯">${groups.deepseek.map(optionHtml).join("")}</optgroup>` : "",
         groups.other.length ? `<optgroup label="其他模型">${groups.other.map(optionHtml).join("")}</optgroup>` : ""
       ].join("");
       const remembered = window.selectedModel || "";
@@ -247,6 +249,9 @@
     } else if (id.startsWith("gpt")) {
       const gpt = id.replace(/^gpt[-_]?/, "").replace(/[-_]/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
       short = `GPT ${gpt}`.trim();
+    } else if (id.startsWith("deepseek")) {
+      const deepseek = id.replace(/^deepseek[-_]?/, "").replace(/[-_]/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+      short = `DeepSeek ${deepseek}`.trim();
     }
     const intimateRecommended = id === "claude-opus-4-6" ? " · 亲密推荐" : "";
     return `${short || "默认模型"}${intimateRecommended}${isDefault ? " · 默认" : ""}`;
