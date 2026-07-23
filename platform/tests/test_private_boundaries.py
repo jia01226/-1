@@ -608,6 +608,8 @@ class IntimatePromptContractTests(unittest.TestCase):
         self.assertIn("不能擅自宣布她高潮", self.source)
         self.assertIn("未知反应不妨碍继续写柯自己的动作", self.source)
         self.assertIn("只有下一项因果事实确实依赖她的新反馈时", self.source)
+        self.assertIn("不能倒填成她主动做到", self.source)
+        self.assertIn("不能为已知状态倒填未知来历", self.source)
         self.assertIn("决定是否允许释放", self.source)
         self.assertIn("事实只以她真实反馈为准", self.source)
 
