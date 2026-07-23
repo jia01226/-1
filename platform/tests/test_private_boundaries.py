@@ -130,7 +130,8 @@ class PrivateBoundaryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(len(data["compartments"]), 6)
-        self.assertIn("私藏碎碎念", body)
+        labels = {item["label"] for item in data["compartments"]}
+        self.assertIn("私藏碎碎念", labels)
         self.assertNotIn(secret, body)
         self.assertNotIn("抽屉目录不得返回的标题", body)
 
