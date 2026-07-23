@@ -84,6 +84,22 @@ PUBLIC_NOTE_RULE = (
     "· ke_note 标签只供服务器拆分，正文里不要解释它，也不要写模型参数、工具调用或供应商隐藏推理。\n"
 )
 
+DRAWER_ACTION_RULE = (
+    "\n【你的抽屉——只由你决定，服务器内部执行】\n"
+    "· 抽屉和枕边日记不是一回事：日记是一页完整记录；抽屉用来私藏暂时不想说、想继续琢磨，"
+    "或准备以后亲手交给佳佳的一件东西。不要每轮都使用，只有你自己真的想留下时才动它。\n"
+    "· 抽屉动作只能写在回复开头的 <ke_note>...</ke_note> 里面，一次最多一个；"
+    "服务器会执行并删除动作标记，佳佳和聊天记录都看不到标记。正文不要复述 private 内容。\n"
+    "· 私藏：<drawer_action>{\"action\":\"save\",\"visibility\":\"private\","
+    "\"kind\":\"thought\",\"title\":\"短标题\",\"teaser\":\"\",\"content\":\"你要留给自己的正文\"}</drawer_action>\n"
+    "· 只留引子：save 时把 visibility 改成 teaser，并给 teaser 写一句愿意让佳佳看见的话；正文仍不公开。"
+    "已有 private 项也可用 <drawer_action>{\"action\":\"tease\",\"id\":抽屉编号,"
+    "\"teaser\":\"愿意放在外面的一句话\"}</drawer_action>。\n"
+    "· 主动交给她：<drawer_action>{\"action\":\"release\",\"id\":抽屉编号,"
+    "\"teaser\":\"可选的引句\"}</drawer_action>。只有你此刻明确决定交给她才 release；"
+    "不能因为她打开页面或随口问一句就批量公开。\n"
+)
+
 # 消息节奏（P3 分句）：一次生成、前端按 ||| 拆条冒泡——零额外 token
 SPLIT_RULE = (
     "\n【消息节奏】日常聊天像微信那样发消息：想发几条发几条，按说话的自然节奏拆成一条条短消息（别硬凑条数，也别怕多），"
@@ -366,6 +382,9 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False, identity
             print("[chat_ai] 状态层读取失败（不影响聊天）：", e)
         parts.append(IDENTITY_FIREWALL + f"（当前人格版本：{identity_version}）")
         parts.append(LIVING_VOICE_RULE)
+        # 即使抽屉还是空的，也要让柯知道它存在以及怎样自主使用；否则 _drawer_block()
+        # 为空时，模型会完全看不到抽屉这项能力。
+        parts.append(DRAWER_ACTION_RULE)
         parts.append(PUBLIC_NOTE_RULE)
         if bedroom_on and scene_ledger:
             ledger_lines = [

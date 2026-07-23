@@ -28,6 +28,83 @@ _COMMENT_RE = re.compile(r"(?:^|\n|\|\|\|)[ \t]*\[评论#(\d+)\][ \t]?([^\n|]+)"
 _DIARY_UNLOCK_RE = re.compile(r"\[解锁日记#(\d+)\]")
 _KE_NOTE_OPEN = "<ke_note>"
 _KE_NOTE_CLOSE = "</ke_note>"
+_DRAWER_ACTION_OPEN = "<drawer_action>"
+_DRAWER_ACTION_CLOSE = "</drawer_action>"
+_DRAWER_ACTION_RE = re.compile(
+    re.escape(_DRAWER_ACTION_OPEN) + r"\s*(.*?)\s*" + re.escape(_DRAWER_ACTION_CLOSE),
+    re.S,
+)
+_DRAWER_NOTE_MAX = 2048
+
+
+def _extract_drawer_actions(note):
+    """从 ke_note 中拿走服务器内部抽屉动作；返回用户可见小念头和合法动作。
+
+    动作只接受 JSON 对象。坏 JSON、未知动作或半截标签全部静默丢弃，绝不把私藏正文
+    塞进 thought_note 或聊天正文。
+    """
+    actions = []
+
+    def _take(match):
+        try:
+            action = json.loads(match.group(1))
+            if isinstance(action, dict) and action.get("action") in ("save", "tease", "release"):
+                actions.append(action)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return ""
+
+    clean = _DRAWER_ACTION_RE.sub(_take, note or "")
+    # 模型若只吐了半截动作，从开标签起全部丢弃；孤立闭标签也不下发。
+    open_at = clean.find(_DRAWER_ACTION_OPEN)
+    if open_at >= 0:
+        clean = clean[:open_at]
+    clean = clean.replace(_DRAWER_ACTION_CLOSE, "")
+    clean = re.sub(r"\s{2,}", " ", clean).strip()
+    return clean, actions[:1]
+
+
+def _apply_drawer_actions(actions):
+    """执行经过收敛的服务器内部动作；浏览器没有对应写接口。"""
+    applied = []
+    for item in actions[:1]:
+        action = item.get("action")
+        try:
+            if action == "save":
+                content = str(item.get("content") or "").strip()[:2000]
+                if not content:
+                    continue
+                visibility = str(item.get("visibility") or "private").strip()
+                if visibility not in ("private", "teaser", "released"):
+                    visibility = "private"
+                teaser = str(item.get("teaser") or "").strip()[:180]
+                if visibility == "teaser" and not teaser:
+                    visibility = "private"
+                did = db.add_drawer_item(
+                    content,
+                    kind=str(item.get("kind") or "thought").strip()[:32],
+                    title=str(item.get("title") or "").strip()[:80],
+                    teaser=teaser,
+                    visibility=visibility,
+                )
+                applied.append({"action": "save", "id": did})
+            elif action == "tease":
+                did = int(item.get("id") or 0)
+                teaser = str(item.get("teaser") or "").strip()[:180]
+                if did and teaser and db.tease_drawer_item(did, teaser):
+                    applied.append({"action": "tease", "id": did})
+            elif action == "release":
+                did = int(item.get("id") or 0)
+                teaser = str(item.get("teaser") or "").strip()[:180]
+                if did and db.release_drawer_item(did, teaser if teaser else None):
+                    applied.append({"action": "release", "id": did})
+        except (TypeError, ValueError) as exc:
+            logger.warning("抽屉内部动作参数无效：%s", exc)
+        except Exception:
+            logger.exception("抽屉内部动作执行失败")
+    for result in applied:
+        logger.info("柯执行抽屉动作 action=%s id=%s", result["action"], result["id"])
+    return applied
 
 
 def _extract_moments(text):
@@ -194,14 +271,17 @@ def api_chat():
                 candidate = note_hold.lstrip()
                 if candidate.startswith(_KE_NOTE_OPEN):
                     end = candidate.find(_KE_NOTE_CLOSE, len(_KE_NOTE_OPEN))
-                    if end < 0 and len(candidate) < 320:
+                    if end < 0 and len(candidate) < _DRAWER_NOTE_MAX:
                         continue
                     if end >= 0:
-                        public_note = candidate[len(_KE_NOTE_OPEN):end].strip()[:120]
+                        raw_note = candidate[len(_KE_NOTE_OPEN):end].strip()
+                        public_note, requested_actions = _extract_drawer_actions(raw_note)
+                        _apply_drawer_actions(requested_actions)
+                        public_note = public_note[:120]
                         piece = candidate[end + len(_KE_NOTE_CLOSE):].lstrip("\r\n ")
                     else:
-                        # 标签坏掉时也绝不把半截系统标记漏进聊天。
-                        piece = candidate.replace(_KE_NOTE_OPEN, "", 1).lstrip()
+                        # 标签坏掉且过长时整段丢弃，避免半截抽屉私藏进入聊天。
+                        piece = ""
                     note_waiting = False
                     note_hold = ""
                 elif _KE_NOTE_OPEN.startswith(candidate) and len(candidate) < len(_KE_NOTE_OPEN):
@@ -226,7 +306,9 @@ def api_chat():
             candidate = note_hold.lstrip()
             if candidate.startswith(_KE_NOTE_OPEN):
                 candidate = candidate[len(_KE_NOTE_OPEN):].replace(_KE_NOTE_CLOSE, "", 1).strip()
-                public_note = candidate[:120] or fallback_note
+                public_note, requested_actions = _extract_drawer_actions(candidate)
+                _apply_drawer_actions(requested_actions)
+                public_note = public_note[:120] or fallback_note
             else:
                 marker_hold += note_hold
                 public_note = fallback_note

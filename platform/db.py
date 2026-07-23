@@ -1538,6 +1538,20 @@ def release_drawer_item(item_id, teaser=None):
     return changed
 
 
+def tease_drawer_item(item_id, teaser):
+    """柯只把一句引子放到抽屉外面，正文仍保持不可见；已公开内容不允许降级覆盖。"""
+    teaser = (teaser or "").strip()
+    if not teaser:
+        return False
+    conn = get_db()
+    cur = conn.execute(
+        "UPDATE ke_drawer_items SET visibility='teaser', teaser=? "
+        "WHERE id=? AND visibility='private'",
+        (teaser, item_id))
+    conn.commit(); changed = cur.rowcount > 0; conn.close()
+    return changed
+
+
 def private_drawer_items(limit=30):
     """模型侧专用读取：包含正文。不要把本函数结果直接 jsonify。"""
     conn = get_db()

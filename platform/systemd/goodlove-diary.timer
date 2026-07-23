@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Goodlove nightly diary at 23:30 China time
+
+[Timer]
+OnCalendar=*-*-* 15:30:00 UTC
+RandomizedDelaySec=2min
+Persistent=true
+Unit=goodlove-diary.service
+
+[Install]
+WantedBy=timers.target

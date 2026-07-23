@@ -1,0 +1,12 @@
+[Unit]
+Description=Goodlove nightly diary, memory consolidation, dream and private diary sync
+After=network-online.target gude.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/-1/platform
+EnvironmentFile=/root/-1/platform/.env
+ExecStart=/usr/bin/flock -n /run/goodlove-diary.lock /root/-1/platform/venv/bin/python /root/-1/platform/diary_writer.py
+

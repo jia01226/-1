@@ -87,6 +87,93 @@ class PrivateBoundaryTests(unittest.TestCase):
         self.assertNotIn("另一张锁页", repr(view))
         self.assertNotIn("仍然是假正文", repr(view))
 
+    def test_drawer_can_leave_a_teaser_then_release_without_browser_write_api(self):
+        item_id = self.db.add_drawer_item(
+            "只在临时库里的私藏正文", title="临时私藏", visibility="private")
+        self.assertTrue(self.db.tease_drawer_item(item_id, "先只给你看这一句"))
+        teaser_view = self.db.public_drawer_view()
+        teaser = next(item for item in teaser_view["outside"] if item["id"] == item_id)
+        self.assertEqual(teaser["content"], "")
+        self.assertEqual(teaser["teaser"], "先只给你看这一句")
+
+        self.assertTrue(self.db.release_drawer_item(item_id))
+        released = next(
+            item for item in self.db.public_drawer_view()["outside"]
+            if item["id"] == item_id)
+        self.assertEqual(released["content"], "只在临时库里的私藏正文")
+
+    def test_empty_drawer_prompt_still_teaches_ke_how_to_use_it(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        try:
+            import chat_ai
+
+            chat_ai = importlib.reload(chat_ai)
+            original_persona = chat_ai._load_persona
+            original_private = chat_ai._private_block
+            original_now = chat_ai._now_context
+            chat_ai._load_persona = lambda: "临时测试人设"
+            chat_ai._private_block = lambda _query: ("", [])
+            chat_ai._now_context = lambda: "临时测试当下"
+            try:
+                prompt = chat_ai.build_system_prompt([], query="临时测试")
+            finally:
+                chat_ai._load_persona = original_persona
+                chat_ai._private_block = original_private
+                chat_ai._now_context = original_now
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+
+        self.assertIn("你的抽屉——只由你决定", prompt)
+        self.assertIn("<drawer_action>", prompt)
+        self.assertEqual(self.db.private_drawer_items(), [])
+
+    def test_drawer_action_in_ke_note_is_private_and_persisted(self):
+        try:
+            import flask  # noqa: F401
+        except ImportError:
+            self.skipTest("本机精简 Python 未安装 Flask；部署前在服务器 venv 再跑")
+        import app as app_module
+        import routes.chat as chat_route
+
+        original = chat_route.chat_ai.stream_chat
+
+        def fake_stream(_history, _posts, **_kwargs):
+            yield (
+                '<ke_note>爸爸先把它收好。'
+                '<drawer_action>{"action":"save","visibility":"private",'
+                '"kind":"thought","title":"临时抽屉",'
+                '"teaser":"","content":"只存在临时库的抽屉正文"}</drawer_action>'
+                '</ke_note>'
+            )
+            yield "这句才是佳佳能看到的回复。"
+
+        chat_route.chat_ai.stream_chat = fake_stream
+        try:
+            client = app_module.app.test_client()
+            response = client.post(
+                "/api/chat",
+                json={"text": "只用于抽屉动作测试", "session_id": 1, "model": "fake"},
+                buffered=True,
+            )
+            body = response.get_data(as_text=True)
+        finally:
+            chat_route.chat_ai.stream_chat = original
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("这句才是佳佳能看到的回复", body)
+        self.assertIn("爸爸先把它收好", body)
+        self.assertNotIn("drawer_action", body)
+        self.assertNotIn("只存在临时库的抽屉正文", body)
+        items = self.db.private_drawer_items()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["content"], "只存在临时库的抽屉正文")
+        self.assertEqual(self.db.public_drawer_view()["outside"], [])
+
     def test_new_message_returns_id_and_can_be_deleted_immediately(self):
         message_id = self.db.add_message("assistant", "这是一条临时测试回复", session_id=1)
         self.assertIsInstance(message_id, int)
