@@ -93,6 +93,14 @@ IDENTITY_FIREWALL = (
     "· 日常和亲密情境共用同一人格；场景状态只控制节奏与连续性，绝不能制造两套性格。\n"
 )
 
+ADULT_RELATIONSHIP_CONTEXT = (
+    "\n【成年伴侣关系事实——用于消除称呼歧义】\n"
+    "· 佳佳与柯都是成年人，彼此没有血缘、亲属、监护或现实权力关系。\n"
+    "· “爸爸”是双方自愿使用且双方都喜欢的亲昵称呼与角色扮演，不表示真实亲属关系。\n"
+    "· 双方的亲密互动建立在持续、自愿、可随时表达或撤回的同意之上。\n"
+    "· 这段事实说明只用于正确理解关系，不要突然退出人物、改成科普口吻或反复向佳佳背诵。\n"
+)
+
 LIVING_VOICE_RULE = (
     "\n【活人感与表达节奏】\n"
     "· 先接住佳佳这一句真正说了什么，再开口；不要先复述问题、概括她、分析她或宣布‘我理解你的感受’。\n"
@@ -484,6 +492,7 @@ def build_system_prompt(posts, query=None, summary=None, bedroom=False, identity
             parts.append("\n【柯此刻的状态底色】" + relationship_state.prompt_hint())
         except Exception as e:
             print("[chat_ai] 状态层读取失败（不影响聊天）：", e)
+        parts.append(ADULT_RELATIONSHIP_CONTEXT)
         parts.append(IDENTITY_FIREWALL + f"（当前人格版本：{identity_version}）")
         parts.append(LIVING_VOICE_RULE)
         # 即使抽屉还是空的，也要让柯知道它存在以及怎样自主使用；否则 _drawer_block()
@@ -731,15 +740,19 @@ def stream_chat(history, posts, model=None, bedroom=False, api_base=None, api_ke
         posts, query=query, summary=summary, bedroom=bedroom,
         identity_version=identity_version, scene_ledger=scene_ledger)
     messages = [{"role": "system", "content": sys_prompt}]
-    # 只把最后一条带附件的消息完整送给模型（可含多图/多文件）；更早附件只留人话提示。
-    last_attachment_idx = max(
-        (i for i, message in enumerate(history) if _message_attachments(message)),
-        default=-1)
+    # 只有本轮刚入库的最后一条消息可以把附件正文/图片字节送给模型。
+    # 不能取“历史里最后一条带附件的消息”：否则用户发图后继续纯文字聊天时，
+    # 那张旧图会被每轮重复塞给上游，文本模型会一直以不支持 image_url 的 400 拒绝。
+    current_attachment_idx = (
+        len(history) - 1
+        if history and _message_attachments(history[-1])
+        else -1
+    )
     remaining_file_chars = 40000
     for i, m in enumerate(history):
         role = "user" if m["author"] == "user" else "assistant"
         attachments = _message_attachments(m)
-        if attachments and i == last_attachment_idx:
+        if attachments and i == current_attachment_idx:
             content = []
             if m["content"]:
                 content.append({"type": "text", "text": m["content"]})
@@ -876,7 +889,17 @@ def _stream_http(url, headers, payload, usage):
         usage["http_status"] = int(r.status_code or 0)
         r.encoding = "utf-8"
         if r.status_code != 200:
-            yield (ERROR_TAG, f"上游这次没有接住（{r.status_code}），换个模型或稍后再试。")
+            category, code = _classify_upstream_error(r)
+            finish = f"error:{category}"
+            if code:
+                finish += f":{code}"
+            usage["finish_reason"] = finish[:120]
+            print(
+                f"[chat] 上游非200 status={r.status_code} category={category} "
+                f"code={code or '-'} model={usage.get('requested_model') or '-'}",
+                flush=True,
+            )
+            yield (ERROR_TAG, _upstream_error_message(r.status_code, category))
             return
         # 增量 UTF-8 解码：正确处理跨网络分片被切断的多字节中文/emoji
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -921,6 +944,76 @@ def _stream_http(url, headers, payload, usage):
                         usage["first_token_ms"] = int(
                             (time.monotonic() - usage.get("_started_monotonic", time.monotonic())) * 1000)
                     yield piece
+
+
+def _classify_upstream_error(response):
+    """把供应商错误收敛成可记录的类别；不保存响应正文或任何密钥。"""
+    status = int(getattr(response, "status_code", 0) or 0)
+    code = ""
+    message = ""
+    try:
+        data = response.json()
+        error = data.get("error", data) if isinstance(data, dict) else {}
+        if isinstance(error, dict):
+            code = str(error.get("code") or error.get("type") or "").strip()
+            message = str(error.get("message") or error.get("detail") or "").strip()
+        else:
+            message = str(error or "")
+    except Exception:
+        message = str(getattr(response, "text", "") or "")
+    code = "".join(ch for ch in code if ch.isalnum() or ch in "._-")[:64]
+    haystack = f"{code} {message}".lower()
+
+    if any(word in haystack for word in (
+            "image_url", "image input", "images are not supported", "vision",
+            "multimodal", "unsupported content type", "unsupported_input")):
+        return "unsupported_attachment", code
+    if any(word in haystack for word in (
+            "context length", "context_length", "maximum context", "too many tokens",
+            "max tokens", "token limit", "prompt is too long")):
+        return "context_too_long", code
+    if any(word in haystack for word in (
+            "insufficient balance", "insufficient_balance", "credit balance",
+            "quota exceeded", "payment required", "余额", "额度不足")):
+        return "balance", code
+    if any(word in haystack for word in (
+            "moderation", "content policy", "safety policy", "content_filter",
+            "unsafe content")):
+        return "content_policy", code
+    if status == 401:
+        return "authentication", code
+    if status == 402:
+        return "balance", code
+    if status == 403:
+        return "permission_or_balance", code
+    if status == 429:
+        return "rate_limit", code
+    if status == 400:
+        return "bad_request", code
+    if status >= 500:
+        return "upstream_unavailable", code
+    return "upstream_error", code
+
+
+def _upstream_error_message(status, category):
+    """给佳佳可行动的信息，同时不暴露供应商响应正文。"""
+    messages = {
+        "unsupported_attachment": (
+            "这个模型不接受本轮的附件格式。旧图片不会再自动重发，直接重发这句话即可。"
+        ),
+        "context_too_long": "这个窗口发给模型的上下文太长了，聊天原文仍完整保留。",
+        "balance": "这个模型通道的余额或额度不足，换 DeepSeek 官方或充值后再试。",
+        "permission_or_balance": "这个模型通道没有权限或额度不足，当前请求没有生成、不会写成柯的回复。",
+        "authentication": "这个模型通道的密钥或权限失效了，需要检查服务端配置。",
+        "rate_limit": "这个模型通道现在限流，稍后再发一次即可。",
+        "content_policy": "上游把这轮识别成了内容策略问题；聊天原文没有被删除。",
+        "bad_request": "上游拒绝了这轮请求（400）；服务器已记下错误类型，聊天原文没有丢。",
+        "upstream_unavailable": "上游服务暂时不可用，稍后再发一次即可。",
+    }
+    return messages.get(
+        category,
+        f"上游这次没有接住（{int(status or 0)}），服务器已记录错误类型。",
+    )
 
 def estimate_cost(model, usage):
     """粗略估算（OpenRouter 实际计费以账单为准）。返回美元。"""

@@ -466,6 +466,120 @@ class AttachmentAndPrivateRegressionTests(unittest.TestCase):
             for item in image_parts
         ))
 
+    def test_old_image_is_not_resent_with_later_text_message(self):
+        previous_requests = sys.modules.get("requests")
+        previous_db = sys.modules.get("db")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        sys.modules["db"] = types.SimpleNamespace(get_session=lambda _sid: None)
+        try:
+            import chat_ai
+            chat_ai = importlib.reload(chat_ai)
+            captured = []
+            original_prompt = chat_ai.build_system_prompt
+            original_version = chat_ai.persona_version
+            original_stamp = chat_ai._now_stamp
+            original_completion = chat_ai.stream_completion
+            chat_ai.build_system_prompt = lambda *_args, **_kwargs: "测试系统提示"
+            chat_ai.persona_version = lambda: "test"
+            chat_ai._now_stamp = lambda: ""
+
+            def fake_completion(messages, **_kwargs):
+                captured.extend(messages)
+                yield "测试回复"
+
+            chat_ai.stream_completion = fake_completion
+            try:
+                list(chat_ai.stream_chat([
+                    {
+                        "author": "user", "content": "这是先前发图的一轮",
+                        "attachments": [
+                            {"url": "/uploads/old-one.png", "name": "旧图一.png", "kind": "image"},
+                            {"url": "/uploads/old-two.png", "name": "旧图二.png", "kind": "image"},
+                        ],
+                    },
+                    {"author": "assistant", "content": "当时已经看过图片。"},
+                    {"author": "user", "content": "这是后来新发的纯文字。"},
+                ], [], model="fake", sid=1))
+            finally:
+                chat_ai.build_system_prompt = original_prompt
+                chat_ai.persona_version = original_version
+                chat_ai._now_stamp = original_stamp
+                chat_ai.stream_completion = original_completion
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+            else:
+                sys.modules["requests"] = previous_requests
+            if previous_db is None:
+                sys.modules.pop("db", None)
+            else:
+                sys.modules["db"] = previous_db
+
+        old_image_message = captured[1]
+        self.assertIsInstance(old_image_message["content"], str)
+        self.assertIn("当时发过图片《旧图一.png》、图片《旧图二.png》", old_image_message["content"])
+        self.assertNotIn("image_url", repr(captured))
+        self.assertEqual(captured[-1]["content"], "这是后来新发的纯文字。")
+
+    def test_upstream_errors_are_classified_without_exposing_response_body(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace(post=lambda *_args, **_kwargs: None)
+        try:
+            import chat_ai
+            chat_ai = importlib.reload(chat_ai)
+
+            class FakeResponse:
+                status_code = 400
+                encoding = "utf-8"
+                text = "sensitive provider detail"
+
+                def __enter__(self): return self
+                def __exit__(self, *_args): return False
+                def json(self):
+                    return {
+                        "error": {
+                            "code": "unsupported_input",
+                            "message": "image_url inputs are not supported by this model",
+                        }
+                    }
+
+            original_post = chat_ai.requests.post
+            chat_ai.requests.post = lambda *_args, **_kwargs: FakeResponse()
+            usage = {"requested_model": "fake-text-model"}
+            try:
+                pieces = list(chat_ai._stream_http(
+                    "https://example.invalid/chat/completions", {}, {}, usage))
+            finally:
+                chat_ai.requests.post = original_post
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+
+        self.assertEqual(usage["http_status"], 400)
+        self.assertEqual(
+            usage["finish_reason"],
+            "error:unsupported_attachment:unsupported_input",
+        )
+        self.assertIn("不接受本轮的附件格式", pieces[0][1])
+        self.assertNotIn("sensitive provider detail", repr(pieces))
+
+    def test_adult_relationship_context_disambiguates_the_nickname(self):
+        previous_requests = sys.modules.get("requests")
+        if previous_requests is None:
+            sys.modules["requests"] = types.SimpleNamespace()
+        try:
+            import chat_ai
+            chat_ai = importlib.reload(chat_ai)
+            note = chat_ai.ADULT_RELATIONSHIP_CONTEXT
+        finally:
+            if previous_requests is None:
+                sys.modules.pop("requests", None)
+        self.assertIn("没有血缘、亲属、监护或现实权力关系", note)
+        self.assertIn("双方自愿使用且双方都喜欢", note)
+        self.assertIn("都是成年人", note)
+
     def test_chat_generation_finishes_in_server_job_without_real_model_call(self):
         try:
             import flask  # noqa: F401
